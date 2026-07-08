@@ -2,6 +2,7 @@ import numpy as np
 from attrs import field, define
 
 from h2integrate.core.utilities import BaseConfig, merge_shared_inputs
+from h2integrate.core.validators import contains
 from h2integrate.core.model_baseclasses import (
     CostModelBaseClass,
     CostModelBaseConfig,
@@ -41,7 +42,7 @@ class GridPerformanceModel(PerformanceModelBaseClass):
     Inputs
         interconnection_size (float): Maximum power capacity for grid connection (kW).
         electricity_in (array): Power flowing into the grid (selling) (kW).
-        electricity_set_point (array): Downstream electricity set point (kW).
+        electricity_command_value (array): Downstream electricity command value (kW).
 
     Outputs
         electricity_out (array): Power flowing out of the grid (buying) (kW).
@@ -51,6 +52,7 @@ class GridPerformanceModel(PerformanceModelBaseClass):
         300,
         3600,
     )  # (min, max) time step lengths (in seconds) compatible with this model
+    _control_classifier = "dispatchable"
 
     def initialize(self):
         super().initialize()
@@ -65,8 +67,6 @@ class GridPerformanceModel(PerformanceModelBaseClass):
             additional_cls_name=self.__class__.__name__,
         )
 
-        n_timesteps = self.options["plant_config"]["plant"]["simulation"]["n_timesteps"]
-
         # Interconnection size input
         self.add_input(
             "interconnection_size",
@@ -79,18 +79,18 @@ class GridPerformanceModel(PerformanceModelBaseClass):
         self.add_input(
             "electricity_in",
             val=0.0,
-            shape=n_timesteps,
+            shape=self.n_timesteps,
             units=self.commodity_rate_units,
             desc="Electricity flowing into grid interconnection point (selling to grid)",
         )
 
-        # Electricity set point from downstream (for buying from grid)
+        # Electricity command value from downstream (for buying from grid)
         self.add_input(
-            "electricity_set_point",
+            "electricity_command_value",
             val=0.0,
-            shape=n_timesteps,
+            shape=self.n_timesteps,
             units=self.commodity_rate_units,
-            desc="Electricity set point from downstream technologies",
+            desc="Electricity command value from downstream technologies",
         )
 
         # electricity_out is electricity flowing OUT OF the grid (buying from grid)
@@ -98,8 +98,8 @@ class GridPerformanceModel(PerformanceModelBaseClass):
         self.add_output(
             "electricity_sold",
             val=0.0,
-            shape=n_timesteps,
-            units=self.commodity_rate_units,
+            shape=self.n_timesteps,
+            units="kW",
             desc="Electricity sold to the grid",
         )
 
@@ -122,7 +122,7 @@ class GridPerformanceModel(PerformanceModelBaseClass):
         self.add_output(
             "electricity_unmet_demand",
             val=0.0,
-            shape=n_timesteps,
+            shape=self.n_timesteps,
             units=self.commodity_rate_units,
             desc="Electricity demand that is not met",
         )
@@ -130,7 +130,7 @@ class GridPerformanceModel(PerformanceModelBaseClass):
         self.add_output(
             "electricity_excess",
             val=0.0,
-            shape=n_timesteps,
+            shape=self.n_timesteps,
             units=self.commodity_rate_units,
             desc="Electricity that was not sold due to interconnection limits",
         )
@@ -150,12 +150,14 @@ class GridPerformanceModel(PerformanceModelBaseClass):
         electricity_sold = np.clip(inputs["electricity_in"], 0, interconnection_size)
         outputs["electricity_sold"] = electricity_sold
 
-        # Buying: electricity flows out of grid to meet set point, limited by interconnection
-        electricity_bought = np.clip(inputs["electricity_set_point"], 0, interconnection_size)
+        # Buying: electricity flows out of grid to meet command value, limited by interconnection
+        electricity_bought = np.clip(inputs["electricity_command_value"], 0, interconnection_size)
         outputs["electricity_out"] = electricity_bought
 
-        # Unmet demand if set point exceeds interconnection size
-        outputs["electricity_unmet_demand"] = inputs["electricity_set_point"] - electricity_bought
+        # Unmet demand if command value exceeds interconnection size
+        outputs["electricity_unmet_demand"] = (
+            inputs["electricity_command_value"] - electricity_bought
+        )
 
         # Not sold electricity if demand exceeds interconnection size
         outputs["electricity_excess"] = inputs["electricity_in"] - electricity_sold
@@ -199,8 +201,12 @@ class GridCostModelConfig(CostModelBaseConfig):
     fixed_interconnection_cost: float = field()  # $
     electricity_buy_price: float | list[float] | np.ndarray | None = field(default=None)  # $/kWh
     electricity_sell_price: float | list[float] | np.ndarray | None = field(default=None)  # $/kWh
-    buy_price_mode: str | None = field(default=None)  # 'per_timestep' or 'per_year'
-    sell_price_mode: str | None = field(default=None)  # 'per_timestep' or 'per_year'
+    buy_price_mode: str | None = field(
+        default="per_timestep", validator=contains(["per_year", "per_timestep", "constant"])
+    )
+    sell_price_mode: str | None = field(
+        default="per_timestep", validator=contains(["per_year", "per_timestep", "constant"])
+    )
 
 
 class GridCostModel(CostModelBaseClass):
@@ -230,9 +236,6 @@ class GridCostModel(CostModelBaseClass):
         )
         super().setup()
 
-        n_timesteps = self.options["plant_config"]["plant"]["simulation"]["n_timesteps"]
-        plant_life = int(self.options["plant_config"]["plant"]["plant_life"])
-
         # Common input for sizing costs
         self.add_input(
             "interconnection_size",
@@ -244,13 +247,13 @@ class GridCostModel(CostModelBaseClass):
         # Add buy price input if configured
         if self.config.electricity_buy_price is not None:
             self._buy_price_mode = self.config.buy_price_mode
-            if self._buy_price_mode is None:
-                self._buy_price_mode = "per_timestep"
 
             if self._buy_price_mode == "per_year":
-                buy_price_shape = plant_life
-            else:
-                buy_price_shape = n_timesteps
+                buy_price_shape = self.plant_life
+            if self._buy_price_mode == "per_timestep":
+                buy_price_shape = self.n_timesteps
+            if self._buy_price_mode == "constant":
+                buy_price_shape = 1
 
             self.add_input(
                 "electricity_buy_price",
@@ -267,7 +270,7 @@ class GridCostModel(CostModelBaseClass):
             self.add_input(
                 "annual_electricity_out",
                 val=0.0,
-                shape=plant_life,
+                shape=self.plant_life,
                 units="kW*h/yr",
                 desc="Annual electricity flowing out of grid (buying from grid)",
             )
@@ -275,7 +278,7 @@ class GridCostModel(CostModelBaseClass):
             self.add_input(
                 "electricity_out",
                 val=0.0,
-                shape=n_timesteps,
+                shape=self.n_timesteps,
                 units="kW",
                 desc="Electricity flowing out of grid (buying from grid)",
             )
@@ -283,13 +286,13 @@ class GridCostModel(CostModelBaseClass):
         # Add sell price input if configured
         if self.config.electricity_sell_price is not None:
             self._sell_price_mode = self.config.sell_price_mode
-            if self._sell_price_mode is None:
-                self._sell_price_mode = "per_timestep"
 
             if self._sell_price_mode == "per_year":
-                sell_price_shape = plant_life
-            else:
-                sell_price_shape = n_timesteps
+                sell_price_shape = self.plant_life
+            if self._sell_price_mode == "per_timestep":
+                sell_price_shape = self.n_timesteps
+            if self._sell_price_mode == "constant":
+                sell_price_shape = 1
 
             self.add_input(
                 "electricity_sell_price",
@@ -306,7 +309,7 @@ class GridCostModel(CostModelBaseClass):
             self.add_input(
                 "annual_electricity_sold",
                 val=0.0,
-                shape=plant_life,
+                shape=self.plant_life,
                 units="kW*h/yr",
                 desc="Annual electricity sold to grid",
             )
@@ -314,7 +317,7 @@ class GridCostModel(CostModelBaseClass):
             self.add_input(
                 "electricity_sold",
                 val=0.0,
-                shape=n_timesteps,
+                shape=self.n_timesteps,
                 units="kW",
                 desc="Electricity flowing into grid (selling to grid)",
             )
@@ -332,8 +335,7 @@ class GridCostModel(CostModelBaseClass):
         outputs["OpEx"] = interconnection_size * opex_per_kw
 
         # Variable operating costs (positive cost for buying, negative for selling)
-        plant_life = int(self.options["plant_config"]["plant"]["plant_life"])
-        varopex = np.zeros(plant_life)
+        varopex = np.zeros(self.plant_life)
 
         # Add buying costs if buy price is configured
         if self.config.electricity_buy_price is not None:

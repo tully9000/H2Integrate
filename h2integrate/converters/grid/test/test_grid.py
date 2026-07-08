@@ -45,7 +45,7 @@ def test_grid_performance_outputs(plant_config, subtests):
 
     # Set demand below interconnection limit
     demand = np.full(n_timesteps, 30000.0)  # 30 MW demand
-    prob.set_val("comp.electricity_set_point", demand)
+    prob.set_val("comp.electricity_command_value", demand)
 
     prob.run_model()
 
@@ -163,7 +163,7 @@ def test_buying_electricity(plant_config, n_timesteps):
 
     # Set demand below interconnection limit
     demand = np.full(n_timesteps, 30000.0)  # 30 MW demand
-    prob.set_val("grid.electricity_set_point", demand)
+    prob.set_val("grid.electricity_command_value", demand)
 
     prob.run_model()
 
@@ -192,7 +192,7 @@ def test_buying_with_interconnection_limit(plant_config, n_timesteps):
 
     # Set demand above interconnection limit
     demand = np.full(n_timesteps, 60000.0)  # 60 MW demand
-    prob.set_val("grid.electricity_set_point", demand)
+    prob.set_val("grid.electricity_command_value", demand)
 
     prob.run_model()
 
@@ -269,7 +269,7 @@ def test_simultaneous_buy_and_sell(plant_config, n_timesteps):
     electricity_demand = np.full(n_timesteps, 40000.0)  # 40 MW out
 
     prob.set_val("grid.electricity_in", electricity_in)
-    prob.set_val("grid.electricity_set_point", electricity_demand)
+    prob.set_val("grid.electricity_command_value", electricity_demand)
 
     prob.run_model()
 
@@ -294,7 +294,7 @@ def test_varying_demand_profile(plant_config, n_timesteps):
 
     # Create varying demand profile
     demand = np.array([10000, 20000, 30000, 50000, 70000, 90000, 110000, 80000, 60000, 40000])
-    prob.set_val("grid.electricity_set_point", demand)
+    prob.set_val("grid.electricity_command_value", demand)
 
     prob.run_model()
 
@@ -331,7 +331,7 @@ def test_non_hourly_dt_demand_profile(subtests, plant_config, n_timesteps):
 
     # Create varying demand profile
     demand = np.array([10000, 20000, 30000, 50000, 70000, 90000, 110000, 80000, 60000, 40000])
-    prob.set_val("grid.electricity_set_point", demand, units="kW")
+    prob.set_val("grid.electricity_command_value", demand, units="kW")
 
     prob.run_model()
 
@@ -870,3 +870,52 @@ def test_per_year_buy_and_sell_prices(plant_config, n_timesteps):
 
     varopex = prob.get_val("grid.VarOpEx", units="USD/year")
     np.testing.assert_allclose(varopex, expected_varopex)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("n_timesteps", [8760])
+def test_constant_buy_and_sell_price(plant_config, n_timesteps):
+    """Test cost model with constant (scalar) buy and sell price mode."""
+    prob = om.Problem()
+
+    interconnection_size = 50000.0
+    buy_price = 0.10
+    sell_price = 0.05
+
+    tech_config = {
+        "model_inputs": {
+            "shared_parameters": {"interconnection_size": interconnection_size},
+            "cost_parameters": {
+                "cost_year": 2022,
+                "interconnection_capex_per_kw": 50.0,
+                "interconnection_opex_per_kw": 2.0,
+                "fixed_interconnection_cost": 100000.0,
+                "electricity_buy_price": buy_price,
+                "electricity_sell_price": sell_price,
+                "buy_price_mode": "constant",
+                "sell_price_mode": "constant",
+            },
+        }
+    }
+
+    prob.model.add_subsystem(
+        "grid",
+        GridCostModel(driver_config={}, plant_config=plant_config, tech_config=tech_config),
+    )
+
+    prob.setup()
+
+    electricity_out = np.full(n_timesteps, 20000.0)  # 20 MW bought
+    electricity_sold = np.full(n_timesteps, 30000.0)  # 30 MW sold
+
+    prob.set_val("grid.electricity_out", electricity_out)
+    prob.set_val("grid.electricity_sold", electricity_sold)
+
+    prob.run_model()
+
+    buying_cost = np.sum(electricity_out * buy_price)
+    selling_revenue = np.sum(electricity_sold * sell_price)
+    expected_varopex = buying_cost - selling_revenue
+
+    varopex = prob.get_val("grid.VarOpEx", units="USD/year")[0]
+    assert varopex == pytest.approx(expected_varopex)
