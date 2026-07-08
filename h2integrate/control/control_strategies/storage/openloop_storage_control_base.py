@@ -1,3 +1,4 @@
+import warnings
 from typing import ClassVar
 
 import numpy as np
@@ -199,7 +200,7 @@ class StorageOpenLoopControlBase(om.ExplicitComponent):
     def common_checks_needed_in_compute(self, inputs):
         if np.all(inputs[f"{self.config.commodity}_demand"] == 0.0):
             msg = "Demand profile is zero, check that demand profile is input"
-            raise UserWarning(msg)
+            warnings.warn(msg, UserWarning, stacklevel=2)
         if inputs["max_charge_rate"][0] < 0:
             msg = (
                 f"max_charge_rate cannot be less than zero and has value of "
