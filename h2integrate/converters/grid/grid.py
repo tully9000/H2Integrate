@@ -106,7 +106,7 @@ class GridPerformanceModel(PerformanceModelBaseClass):
         self.add_output(
             "electricity_headroom_sold",
             val=0.0,
-            shape=n_timesteps,
+            shape=self.n_timesteps,
             units=self.commodity_rate_units,
             desc="Reserve capacity that could be sold to the grid",
         )
@@ -114,7 +114,7 @@ class GridPerformanceModel(PerformanceModelBaseClass):
         self.add_output(
             "electricity_headroom_out",
             val=0.0,
-            shape=n_timesteps,
+            shape=self.n_timesteps,
             units=self.commodity_rate_units,
             desc="Reserve capacity that could be bought from the grid",
         )
