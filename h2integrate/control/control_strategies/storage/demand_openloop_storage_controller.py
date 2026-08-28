@@ -151,8 +151,10 @@ class DemandOpenLoopStorageController(OpenLoopControlBase):
         # the previous time step's value
         # soc = deepcopy(init_soc_fraction)
         if simulation_range.start == 0:
-            # soc = self.config.init_soc_fraction
-            soc = self._soc_timeseries[0]
+            if hasattr(self.config, "init_soc_fraction"):
+                soc = self.config.init_soc_fraction
+            else:
+                soc = self._soc_timeseries[0]
         else:
             soc = self._soc_timeseries[simulation_range.start - 1]
 
