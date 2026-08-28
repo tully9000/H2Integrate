@@ -1161,9 +1161,13 @@ class H2IntegrateModel:
         # Build the controller sized to the plant's simulation horizon so its
         # vector I/O matches the performance model's time-series I/O.
         n_timesteps = int(self.plant_config["plant"]["simulation"]["n_timesteps"])
+        n_steps_per_compute = int(
+            self.plant_config["plant"]["simulation"].get("n_steps_per_compute", n_timesteps)
+        )
         controller = PassthroughController(
             commodity=commodity,
             n_timesteps=n_timesteps,
+            n_steps_per_compute=n_steps_per_compute,
             commodity_rate_units=commodity_rate_units,
         )
 

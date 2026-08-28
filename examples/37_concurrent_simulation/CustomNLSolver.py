@@ -1,3 +1,4 @@
+import tqdm
 import numpy as np
 from openmdao.solvers.nonlinear.nonlinear_runonce import NonlinearRunOnce
 
@@ -20,7 +21,7 @@ class CustomNonLinearRunOnce(NonlinearRunOnce):
         # Make time stepping loop
         sim_starts = np.arange(0, n_timesteps, n_steps_per_compute)
 
-        for ss in sim_starts:
+        for ss in tqdm.tqdm(sim_starts):
             # Update timestep_index in all subsystems
             for tk in timestep_keys:
                 system._inputs[tk] = ss
