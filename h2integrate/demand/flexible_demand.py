@@ -243,7 +243,7 @@ class FlexibleDemandComponent(DemandComponentBase):
                     break
         return flexible_demand_profile
 
-    def compute(self, inputs, outputs, discrete_inputs, discrete_outputs):
+    def compute(self, inputs, outputs):
         """Compute unmet demand, unused commodity, and output under flexible demand.
 
         If ``min_utilization == 1.0``, the behavior matches the regular open-loop
@@ -288,5 +288,5 @@ class FlexibleDemandComponent(DemandComponentBase):
             outputs[f"{self.commodity}_flexible_demand_profile"] = flexible_demand_profile
 
             outputs = self.calculate_outputs(
-                inputs[f"{self.commodity}_in"], flexible_demand_profile, outputs, discrete_inputs
+                inputs[f"{self.commodity}_in"], flexible_demand_profile, inputs, outputs
             )
