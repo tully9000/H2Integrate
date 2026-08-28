@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from h2integrate import H2IntegrateModel
 
 
-sys.path.append(str(Path(__file__).resolve().parents[0]))
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 from CustomNLSolver import CustomNonLinearRunOnce
 
 
