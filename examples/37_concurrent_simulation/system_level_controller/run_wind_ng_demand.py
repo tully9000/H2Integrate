@@ -1,7 +1,40 @@
+import sys
+from pathlib import Path
+
+import yaml
 import numpy as np
 import matplotlib.pyplot as plt
 
 from h2integrate.core.h2integrate_model import H2IntegrateModel
+
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+
+def load_yaml_to_dict(fpath):
+    with Path(fpath).open() as f:
+        config = yaml.safe_load(f)
+    return config
+
+
+# Load config files into dict
+config_root = Path(__file__).parent
+config_path = config_root / "wind_ng_demand.yaml"
+
+# Load top level config
+config = load_yaml_to_dict(config_path)
+
+# Fill driver config
+driver_config_path = config_root / config["driver_config"]
+config["driver_config"] = load_yaml_to_dict(driver_config_path)
+
+# Fill technology config
+technology_config_path = config_root / config["technology_config"]
+config["technology_config"] = load_yaml_to_dict(technology_config_path)
+
+# Fill plant config
+plant_config_path = config_root / config["plant_config"]
+config["plant_config"] = load_yaml_to_dict(plant_config_path)
 
 
 ##################################
