@@ -119,7 +119,6 @@ if run_dict.get("run_concurrent", False):
     # Run the model
 
     pf = Profiler(run_profile=False)
-
     with pf:
         h2i_con.run()
 
@@ -154,6 +153,10 @@ if run_dict.get("run_concurrent", False):
 ax[0].set_ylabel("Battery SOC")
 ax[1].set_ylabel("Battery command")
 ax[2].set_ylabel("SLC battery command")
+
+ax[0].axhline(40, color="black", linewidth=1)
+ax[0].axhline(60, color="black", linewidth=1)
+
 ax[0].set_xlim([-5, 30])
 ax[1].set_ylim([-12345.6, -12345.7])
 
