@@ -1,3 +1,6 @@
+import pstats
+import cProfile
+
 import numpy as np
 
 
@@ -63,3 +66,18 @@ def find_nonzero_percent_diffs(pd_dict, ref_dict):
 #     )
 
 #     ax[0].set_title(key)
+
+
+class Profiler:
+    def __init__(self):
+        pass
+
+    def __enter__(self):
+        self.profiler = cProfile.Profile()
+        self.profiler.enable()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.profiler.disable()
+
+        self.stats = pstats.Stats(self.profiler).sort_stats("cumulative")
+        self.stats.print_stats(50)

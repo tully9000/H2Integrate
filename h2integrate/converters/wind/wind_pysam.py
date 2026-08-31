@@ -532,6 +532,8 @@ class PYSAMWindPlantPerformanceModel(WindPerformanceBaseClass):
             # run the model
             self.system_model.execute(0)
 
+            self._PYSAM_model_has_been_executed = True
+
         # Re-set model execution flag at the end of the simulation
         if int(inputs["timestep_index"][0]) + self.n_steps_per_compute >= self.n_timesteps:
             self._PYSAM_model_has_been_executed = False

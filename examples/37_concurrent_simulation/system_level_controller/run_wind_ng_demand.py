@@ -10,6 +10,7 @@ from h2integrate.core.h2integrate_model import H2IntegrateModel
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 from CustomNLSolver import CustomNonLinearRunOnce
+from comparison_tools import Profiler
 
 
 # Run one of both simulation paradigms by changing the flags in this dict
@@ -97,7 +98,12 @@ if run_dict.get("run_concurrent", False):
 
     t0 = time.time()
     # Run the model
-    h2i_con.run()
+
+    pf = Profiler()
+
+    with pf:
+        h2i_con.run()
+
     t1 = time.time()
 
     print(f"Concurrent took {t1 - t0:.3f} seconds")
