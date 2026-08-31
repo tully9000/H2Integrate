@@ -31,6 +31,13 @@ class DemandFollowingControl(SystemLevelControlBase):
        (each receives ``remaining_demand / n_dispatchable``).
     """
 
+    def setup(self):
+        super().setup()
+
+        self.add_input(
+            "SOC", val=0.0, shape=self.n_timesteps, units="unitless", desc="Battery state of charge"
+        )
+
     def compute(self, inputs, outputs):
         self._get_compute_time_range(inputs["timestep_index"])
 

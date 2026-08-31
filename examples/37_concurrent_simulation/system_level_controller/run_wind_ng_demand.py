@@ -96,6 +96,8 @@ if run_dict.get("run_concurrent", False):
     )
     # h2i_con.prob.model.plant.linear_solver = CustomLinearRunOnce()
 
+    # h2i_con.prob.model.plant.system_level_controller.add_input("SOC")
+
     t0 = time.time()
     # Run the model
 
