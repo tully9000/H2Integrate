@@ -4,6 +4,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import yaml
+import matplotlib.pyplot as plt
 
 from h2integrate.core.h2integrate_model import H2IntegrateModel
 
@@ -15,7 +16,7 @@ from comparison_tools import Profiler
 
 # Run one of both simulation paradigms by changing the flags in this dict
 run_dict = {
-    # "run_sequential": True,
+    "run_sequential": True,
     "run_concurrent": True,
 }
 
@@ -57,6 +58,8 @@ config["plant_config"] = load_yaml_to_dict(plant_config_path)
 # h2i.post_process()
 
 
+fig, ax = plt.subplots(3, 1, sharex="all", layout="constrained")
+
 # Run simulation sequentially one subsystem at a time
 if run_dict.get("run_sequential", False):
     config_seq = deepcopy(config)
@@ -79,6 +82,23 @@ if run_dict.get("run_sequential", False):
     inputs_seq = h2i_seq.model.list_inputs(out_stream=None)
     outputs_seq = h2i_seq.model.list_outputs(out_stream=None)
 
+    SLC_battery_cmd = dict(outputs_seq)[
+        "plant.system_level_controller.battery_electricity_set_point"
+    ]["val"]
+
+    battery_out = dict(outputs_seq)[
+        "plant.battery.StoragePerformanceModel.storage_electricity_discharge"
+    ]["val"]
+    battery_cmd = dict(inputs_seq)[
+        "plant.battery.StoragePerformanceModel.electricity_command_value"
+    ]["val"]
+
+    battery_SOC = dict(outputs_seq)["plant.battery.StoragePerformanceModel.SOC"]["val"]
+
+    ax[0].plot(battery_SOC)
+    ax[1].plot(battery_cmd)
+    ax[2].plot(SLC_battery_cmd)
+
 
 # Run the simulation concurrently for all subsystems one step at a time
 if run_dict.get("run_concurrent", False):
@@ -94,14 +114,11 @@ if run_dict.get("run_concurrent", False):
     h2i_con.prob.model.plant.nonlinear_solver = CustomNonLinearRunOnce(
         plant_config=h2i_con.plant_config
     )
-    # h2i_con.prob.model.plant.linear_solver = CustomLinearRunOnce()
-
-    # h2i_con.prob.model.plant.system_level_controller.add_input("SOC")
 
     t0 = time.time()
     # Run the model
 
-    pf = Profiler()
+    pf = Profiler(run_profile=False)
 
     with pf:
         h2i_con.run()
@@ -115,6 +132,30 @@ if run_dict.get("run_concurrent", False):
 
     inputs_con = h2i_con.model.list_inputs(out_stream=None)
     outputs_con = h2i_con.model.list_outputs(out_stream=None)
+
+    SLC_battery_cmd = dict(outputs_con)[
+        "plant.system_level_controller.battery_electricity_set_point"
+    ]["val"]
+
+    battery_out = dict(outputs_con)[
+        "plant.battery.StoragePerformanceModel.storage_electricity_discharge"
+    ]["val"]
+    battery_cmd = dict(inputs_con)[
+        "plant.battery.StoragePerformanceModel.electricity_command_value"
+    ]["val"]
+
+    battery_SOC = dict(outputs_con)["plant.battery.StoragePerformanceModel.SOC"]["val"]
+
+    ax[0].plot(battery_SOC)
+    ax[1].plot(battery_cmd)
+    ax[2].plot(SLC_battery_cmd)
+
+
+ax[0].set_ylabel("Battery SOC")
+ax[1].set_ylabel("Battery command")
+ax[2].set_ylabel("SLC battery command")
+ax[0].set_xlim([-5, 30])
+ax[1].set_ylim([-12345.6, -12345.7])
 
 
 # # Plot the first 168 hours (1 week)
