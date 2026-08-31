@@ -347,7 +347,6 @@ class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
             self.system_model.Outputs.gen[simulation_range.start : simulation_range.stop]
         )  # kW-dc
 
-        # TODO double check these calculations are correctly implemented for annual calculation
         pv_capacity_kWdc = self.system_model.value("system_capacity")
         dc_ac_ratio = self.system_model.value("dc_ac_ratio")
         outputs["system_capacity_AC"] = pv_capacity_kWdc / dc_ac_ratio

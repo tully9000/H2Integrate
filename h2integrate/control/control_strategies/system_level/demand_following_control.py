@@ -32,6 +32,8 @@ class DemandFollowingControl(SystemLevelControlBase):
     """
 
     def compute(self, inputs, outputs):
+        self._get_compute_time_range(inputs["timestep_index"])
+
         commodity = self.commodity
         demand = inputs[self.demand_input_name].copy()
 

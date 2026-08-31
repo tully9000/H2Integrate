@@ -149,6 +149,11 @@ class SystemLevelControlBase(om.ExplicitComponent):
         slc_topology = self.options["slc_topology"]
 
         self.n_timesteps = plant_config["plant"]["simulation"]["n_timesteps"]
+        self.n_steps_per_compute = plant_config["plant"]["simulation"].get(
+            "n_steps_per_compute", self.n_timesteps
+        )
+
+        self.add_input("timestep_index", val=0, desc="Time step index")
 
         # Read pre-computed classification from plant_config
         self.commodity = slc_topology["demand_commodity"]
@@ -936,3 +941,8 @@ class SystemLevelControlBase(om.ExplicitComponent):
                 last_converter = source_tech
 
         return converter_techs
+
+    def _get_compute_time_range(self, time_index):
+        # TODO add comment
+        ti = int(time_index[0])
+        return range(ti, ti + self.n_steps_per_compute)

@@ -28,8 +28,6 @@ class CustomNonLinearRunOnce(NonlinearRunOnce):
         # TODO get N_sim and N_step from H2I config rather than a subsystem model
         n_timesteps = self.plant_config["plant"]["simulation"]["n_timesteps"]
         n_steps_per_compute = self.plant_config["plant"]["simulation"]["n_steps_per_compute"]
-        # n_steps_per_compute = system.solar.PYSAMSolarPlantPerformanceModel.n_steps_per_compute
-        # n_timesteps = system.solar.PYSAMSolarPlantPerformanceModel.n_timesteps
 
         # Make time stepping loop
         sim_starts = np.arange(0, n_timesteps, n_steps_per_compute)
