@@ -1,11 +1,13 @@
-import tqdm
 import numpy as np
+from openmdao.recorders.recording_iteration_stack import Recording
 from openmdao.solvers.nonlinear.nonlinear_runonce import NonlinearRunOnce
 
 
-# TODO more descriptive class name
-class CustomNonLinearRunOnce(NonlinearRunOnce):
-    """A simple custom nonlinear solver skeleton."""
+class ConcurrentPlantNLSolver(NonlinearRunOnce):
+    """
+    Custom nonlinear solver to manage running the plant group in a loop.
+
+    """
 
     def __init__(self, plant_config):
         super().__init__()
@@ -25,7 +27,6 @@ class CustomNonLinearRunOnce(NonlinearRunOnce):
             k for k in system._discrete_inputs.keys() if k.endswith("skip_compute")
         ]
 
-        # TODO get N_sim and N_step from H2I config rather than a subsystem model
         n_timesteps = self.plant_config["plant"]["simulation"]["n_timesteps"]
         n_steps_per_compute = self.plant_config["plant"]["simulation"]["n_steps_per_compute"]
 
@@ -39,25 +40,20 @@ class CustomNonLinearRunOnce(NonlinearRunOnce):
         for sk in skip_compute_keys:
             system._discrete_inputs[sk] = True
 
-        for ss in tqdm.tqdm(sim_starts):
-            # Update timestep_index in all subsystems
-            for tk in timestep_keys:
-                system._inputs[tk] = ss
+        with Recording("NLRunOnce", 0, self) as rec:
+            for ss in sim_starts:
+                # Update timestep_index in all subsystems
+                for tk in timestep_keys:
+                    system._inputs[tk] = ss
 
-            if ss == final_timestep_index:
-                # Set skip_compute to False for the final simulation period so
-                # that the relevant calculations will be computed just once.
-                for sk in skip_compute_keys:
-                    system._discrete_inputs[sk] = False
+                if ss == final_timestep_index:
+                    # Set skip_compute to False for the final simulation period so
+                    # that the relevant calculations will be computed just once.
+                    for sk in skip_compute_keys:
+                        system._discrete_inputs[sk] = False
 
-            # Run one GS iteration on the plant group
-            self._gs_iter()
+                # Run one GS iteration on the plant group
+                self._gs_iter()
 
-
-# May be needed later
-# class CustomLinearRunOnce(LinearRunOnce):
-#     SOLVER = "LN: CUSTOM"
-
-#     def solve(self, mode, rel_systems=None):
-#         self.was_called = True
-#         super().solve(mode=mode, rel_systems=rel_systems)
+            rec.abs = 0.0
+            rec.rel = 0.0

@@ -8,7 +8,14 @@ import pandas as pd
 import pytest
 import openmdao.api as om
 
-from h2integrate import ROOT_DIR, H2IntegrateModel, load_yaml, load_plant_yaml
+from h2integrate import (
+    ROOT_DIR,
+    H2IntegrateModel,
+    load_yaml,
+    load_tech_yaml,
+    load_plant_yaml,
+    load_driver_yaml,
+)
 
 
 ROOT = Path(__file__).parents[1]
@@ -1459,8 +1466,6 @@ def test_pyomo_heuristic_dispatch_example(subtests, temp_copy_of_example):
     # Run the model
     model.run()
 
-    model.post_process()
-
     # Test battery storage functionality
     # SOC should stay within configured bounds (10% to 90%)
     # Due to pysam simulation, bounds may not be fully respected,
@@ -1531,7 +1536,7 @@ def test_pyomo_heuristic_dispatch_example(subtests, temp_copy_of_example):
     model_config = load_yaml(example_folder / "pyomo_heuristic_dispatch.yaml")
     tech = load_yaml(example_folder / "tech_config.yaml")
     with subtests.test("Ensure no-tech name validates"):
-        tech["technologies"]["battery"]["model_inputs"]["control_parameters"] = None
+        tech["technologies"]["battery"]["model_inputs"].pop("control_parameters")
         model_config["technology_config"] = tech
         model = H2IntegrateModel(model_config)
 
@@ -2276,7 +2281,7 @@ def test_iron_mapping_example(subtests, temp_copy_of_example):
     ex_dir = example_folder
     ex_out_dir = ex_dir / "ex_out"
     ore_prices_filepath = ex_dir / "example_ore_prices.csv"
-    shipping_coords_filepath = ROOT_DIR / "converters/iron/martin_transport/shipping_coords.csv"
+    shipping_coords_filepath = ROOT_DIR / "converters/iron/simple_transport/shipping_coords.csv"
     shipping_prices_filepath = ex_dir / "example_shipping_prices.csv"
     cases_csv_fpath = ex_out_dir / "cases.csv"
     ex_png_fpath = ex_out_dir / "example_iron_map.png"
@@ -2563,6 +2568,30 @@ def test_iron_dri_eaf_example(subtests, temp_copy_of_example):
     with subtests.test("Value check on LCOS"):
         lcos = h2i.model.get_val("finance_subgroup_steel.LCOS", units="USD/t")[0]
         assert pytest.approx(lcos, rel=1e-4) == 531.5842266865
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "example_folder,resource_example_folder", [("21_iron_examples/iron_dri_nrri", None)]
+)
+def test_iron_dri_nrri_example(subtests, temp_copy_of_example):
+    example_folder = temp_copy_of_example
+
+    h2i = H2IntegrateModel(example_folder / "single_site_iron.yaml")
+
+    h2i.run()
+
+    with subtests.test("Value check on LCOI"):
+        lcoi = h2i.model.get_val("finance_subgroup_iron_ore.LCOI", units="USD/t")[0]
+        assert pytest.approx(lcoi, rel=1e-4) == 129.083
+
+    with subtests.test("Value check on LCOS"):
+        lcos = h2i.model.get_val("finance_subgroup_sponge_iron.LCOS", units="USD/t")[0]
+        assert pytest.approx(lcos, rel=1e-4) == 350.302
+
+    with subtests.test("Value check on LCOS"):
+        lcos = h2i.model.get_val("finance_subgroup_steel.LCOS", units="USD/t")[0]
+        assert pytest.approx(lcos, rel=1e-4) == 520.417
 
 
 @pytest.mark.integration
@@ -3180,3 +3209,66 @@ def test_nuclear_reactor_htse_example(subtests, temp_copy_of_example):
 
     with subtests.test("Unused electricity is routed to grid sell"):
         assert pytest.approx(unused_electricity.sum(), rel=1e-6) == grid_electricity_in.sum()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "example_folder,resource_example_folder", [("37_concurrent_simulation", None)]
+)
+def test_concurrent_simulation_example(subtests, temp_copy_of_example):
+    example_folder = temp_copy_of_example
+
+    # Load config files into dict
+    config_root = example_folder
+    config_path = config_root / "solar_battery_grid.yaml"
+
+    # Load top level config
+    config = load_yaml(config_path)
+    config["driver_config"] = load_driver_yaml(config_root / config["driver_config"])
+    config["technology_config"] = load_tech_yaml(config_root / config["technology_config"])
+    config["plant_config"] = load_plant_yaml(config_root / config["plant_config"])
+
+    # Run simulation sequentially, one subsystem at a time
+    config["plant_config"]["plant"]["simulation"].pop("n_steps_per_compute")
+
+    h2i_seq = H2IntegrateModel(config)
+    h2i_seq.run()
+    h2i_seq.post_process(print_results=False)
+
+    inputs_seq = dict(h2i_seq.model.list_inputs(out_stream=None))
+    outputs_seq = dict(h2i_seq.model.list_outputs(out_stream=None))
+
+    # Run simulation concurrently for all subsystems, one step at a time
+    config["plant_config"]["plant"]["simulation"]["n_timesteps"] = 8760
+    config["plant_config"]["plant"]["simulation"]["n_steps_per_compute"] = 24
+
+    # Create an H2I model for steppable simulation
+    h2i_con = H2IntegrateModel(config)
+    h2i_con.run()
+    h2i_con.post_process(print_results=False)
+
+    inputs_con = dict(h2i_con.model.list_inputs(out_stream=None))
+    outputs_con = dict(h2i_con.model.list_outputs(out_stream=None))
+
+    from h2integrate.core.dict_utils import percent_diff_dicts
+
+    inputs_pd_dict = percent_diff_dicts(inputs_seq, inputs_con)
+    outputs_pd_dict = percent_diff_dicts(outputs_seq, outputs_con)
+
+    with subtests.test("Component iter_count reflects expected number of calls"):
+        assert h2i_seq.plant.battery.StoragePerformanceModel.iter_count == 1
+        assert h2i_con.plant.battery.StoragePerformanceModel.iter_count == 365
+
+    with subtests.test("Sequential and concurrent H2I inputs are consistent"):
+        for k, v in inputs_pd_dict.items():
+            if k.endswith(".timestep_index"):
+                continue
+            assert (
+                v <= 1e-8
+            ), f"H2I input: {k}, is not consistent between sequential and concurrent simulations"
+
+    with subtests.test("Sequential and concurrent H2I outputs are consistent"):
+        for k, v in outputs_pd_dict.items():
+            assert (
+                v <= 1e-8
+            ), f"H2I output: {k}, is not consistent between sequential and concurrent simulations"
