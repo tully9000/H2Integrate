@@ -1,17 +1,16 @@
 import numpy as np
 import pandas as pd
-from attrs import field, define
+from attrs import field, define, validators
 from openmdao.utils import units
 
 from h2integrate import ROOT_DIR
 from h2integrate.core.utilities import BaseConfig, merge_shared_inputs
-from h2integrate.core.validators import contains
 from h2integrate.core.model_baseclasses import PerformanceModelBaseClass
 
 
 @define(kw_only=True)
-class MartinIronMinePerformanceConfig(BaseConfig):
-    """Configuration class for MartinIronMinePerformanceComponent.
+class SimpleIronMinePerformanceConfig(BaseConfig):
+    """Configuration class for SimpleIronMinePerformanceComponent.
 
     Attributes:
         taconite_pellet_type (str): type of taconite pellets, options are "std" or "drg".
@@ -24,13 +23,15 @@ class MartinIronMinePerformanceConfig(BaseConfig):
     max_ore_production_rate_tonnes_per_hr: float = field()
 
     taconite_pellet_type: str = field(
-        converter=(str.lower, str.strip), validator=contains(["std", "drg"])
+        converter=(str.lower, str.strip), validator=validators.in_(["std", "drg"])
     )
 
-    mine: str = field(validator=contains(["Hibbing", "Northshore", "United", "Minorca", "Tilden"]))
+    mine: str = field(
+        validator=validators.in_(["Hibbing", "Northshore", "United", "Minorca", "Tilden"])
+    )
 
 
-class MartinIronMinePerformanceComponent(PerformanceModelBaseClass):
+class SimpleIronMinePerformanceComponent(PerformanceModelBaseClass):
     _time_step_bounds = (
         3600,
         3600,
@@ -45,7 +46,7 @@ class MartinIronMinePerformanceComponent(PerformanceModelBaseClass):
 
     def setup(self):
         super().setup()
-        self.config = MartinIronMinePerformanceConfig.from_dict(
+        self.config = SimpleIronMinePerformanceConfig.from_dict(
             merge_shared_inputs(self.options["tech_config"]["model_inputs"], "performance"),
             strict=True,
             additional_cls_name=self.__class__.__name__,
@@ -101,7 +102,7 @@ class MartinIronMinePerformanceComponent(PerformanceModelBaseClass):
             desc="Electricity consumed",
         )
 
-        coeff_fpath = ROOT_DIR / "converters" / "iron" / "martin_ore" / "perf_coeffs.csv"
+        coeff_fpath = ROOT_DIR / "converters" / "iron" / "simple_ore" / "perf_coeffs.csv"
         # martin ore performance model
         coeff_df = pd.read_csv(coeff_fpath, index_col=0)
         self.coeff_df = self.format_coeff_df(coeff_df, self.config.mine)

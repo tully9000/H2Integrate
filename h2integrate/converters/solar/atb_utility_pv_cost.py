@@ -1,7 +1,6 @@
-from attrs import field, define
+from attrs import field, define, validators
 
 from h2integrate.core.utilities import merge_shared_inputs
-from h2integrate.core.validators import gt_zero
 from h2integrate.core.model_baseclasses import CostModelBaseClass, CostModelBaseConfig
 
 
@@ -21,8 +20,8 @@ class ATBUtilityPVCostModelConfig(CostModelBaseConfig):
         cost_year (int): dollar year corresponding to input costs
     """
 
-    capex_per_kWac: float | int = field(validator=gt_zero)
-    opex_per_kWac_per_year: float | int = field(validator=gt_zero)
+    capex_per_kWac: float | int = field(validator=validators.gt(0))
+    opex_per_kWac_per_year: float | int = field(validator=validators.gt(0))
 
 
 class ATBUtilityPVCostModel(CostModelBaseClass):
@@ -41,8 +40,9 @@ class ATBUtilityPVCostModel(CostModelBaseClass):
         self.add_input("system_capacity_AC", val=0.0, units="kW", desc="PV rated capacity in AC")
 
     def compute(self, inputs, outputs, discrete_inputs, discrete_outputs):
-        capacity = inputs["system_capacity_AC"][0]
-        capex = self.config.capex_per_kWac * capacity
-        opex = self.config.opex_per_kWac_per_year * capacity
-        outputs["CapEx"] = capex
-        outputs["OpEx"] = opex
+        if not discrete_inputs["skip_compute"]:
+            capacity = inputs["system_capacity_AC"][0]
+            capex = self.config.capex_per_kWac * capacity
+            opex = self.config.opex_per_kWac_per_year * capacity
+            outputs["CapEx"] = capex
+            outputs["OpEx"] = opex

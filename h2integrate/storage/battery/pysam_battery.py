@@ -1,10 +1,9 @@
 import numpy as np
 import PySAM.BatteryTools as BatteryTools
 import PySAM.BatteryStateful as BatteryStateful
-from attrs import field, define
+from attrs import field, define, validators
 
 from h2integrate.core.utilities import merge_shared_inputs
-from h2integrate.core.validators import contains, gte_zero, range_val
 from h2integrate.storage.storage_baseclass import (
     StoragePerformanceBase,
     StoragePerformanceBaseConfig,
@@ -51,16 +50,16 @@ class PySAMBatteryPerformanceModelConfig(StoragePerformanceBaseConfig):
             Defaults to 0.001.
     """
 
-    max_capacity: float = field(validator=gte_zero)
-    max_charge_rate: float = field(validator=gte_zero)
+    max_capacity: float = field(validator=validators.ge(0))
+    max_charge_rate: float = field(validator=validators.ge(0))
 
     chemistry: str = field(
-        validator=contains(["LFPGraphite", "LMOLTO", "LeadAcid", "NMCGraphite"]),
+        validator=validators.in_(["LFPGraphite", "LMOLTO", "LeadAcid", "NMCGraphite"]),
     )
 
-    init_soc_fraction: float = field(validator=range_val(0, 1))
+    init_soc_fraction: float = field(validator=(validators.ge(0), validators.le(1)))
     control_variable: str = field(
-        default="input_power", validator=contains(["input_power", "input_current"])
+        default="input_power", validator=validators.in_(["input_power", "input_current"])
     )
     ref_module_capacity: int | float = field(default=400)
     ref_module_surface_area: int | float = field(default=30)
@@ -189,6 +188,7 @@ class PySAMBatteryPerformanceModel(StoragePerformanceBase):
         storage_capacity: float,
         commodity_available=list | np.ndarray,
         sim_start_index: int = 0,
+        sim_end_index: int = 8760,
     ):
         """Run the PySAM BatteryStateful model over a control window.
 
@@ -212,6 +212,9 @@ class PySAMBatteryPerformanceModel(StoragePerformanceBase):
                 PySAM control input to set each step ("input_power" or "input_current").
             sim_start_index : int, optional
                 Starting index for writing into persistent output arrays (default 0).
+            sim_end_index (int, optional):
+                Ending index for writing into persistent output arrays.
+                Defaults to 8760 (1 year)
 
         Returns:
             tuple[np.ndarray, np.ndarray]: Battery power (kW) and SOC (%) per timestep.

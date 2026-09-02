@@ -31,7 +31,16 @@ class DemandFollowingControl(SystemLevelControlBase):
        (each receives ``remaining_demand / n_dispatchable``).
     """
 
+    def setup(self):
+        super().setup()
+
+        self.add_input(
+            "SOC", val=0.0, shape=self.n_timesteps, units="unitless", desc="Battery state of charge"
+        )
+
     def compute(self, inputs, outputs):
+        simulation_range = self._get_compute_time_range(inputs["timestep_index"])
+
         commodity = self.commodity
         demand = inputs[self.demand_input_name].copy()
 
@@ -80,6 +89,23 @@ class DemandFollowingControl(SystemLevelControlBase):
         for dispatchable_tech in self.dispatchable_techs:
             commodity_from_tech = self._get_commodity_for_tech(dispatchable_tech)
             if commodity in commodity_from_tech:
-                outputs[f"{dispatchable_tech}_{commodity}_set_point"] = (
-                    remaining_demand / n_dispatchable
+                outputs[f"{dispatchable_tech}_{commodity}_set_point"][simulation_range] = (
+                    remaining_demand[simulation_range] / n_dispatchable
                 )
+
+        # if (int(inputs["timestep_index"][0]) < 250) and (int(inputs["timestep_index"][0]) > 0):
+        #     current_SOC = inputs["SOC"][int(inputs["timestep_index"][0])]
+
+        #     if (current_SOC > 0.4) and (current_SOC < 0.6):
+        #         # outputs["battery_electricity_set_point"]
+        #         # [int(inputs["timestep_index"][0])+1] = -12345.6789
+        #         outputs["battery_electricity_set_point"][
+        #             int(inputs["timestep_index"][0])
+        #         ] = -12345.6789
+
+        # # else:
+
+        # if int(inputs["timestep_index"][0]) < self.n_timesteps - 1:
+        #     outputs["battery_electricity_set_point"][int(inputs["timestep_index"][0]) + 1] = (
+        #         outputs["battery_electricity_set_point"][int(inputs["timestep_index"][0])]
+        #     )

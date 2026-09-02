@@ -1,8 +1,7 @@
-from attrs import field, define
+from attrs import field, define, validators
 from openmdao.utils import units
 
 from h2integrate.core.utilities import merge_shared_inputs
-from h2integrate.core.validators import contains, gte_zero, range_val
 from h2integrate.core.model_baseclasses import CostModelBaseClass, CostModelBaseConfig
 
 
@@ -31,12 +30,12 @@ class ATBBatteryCostConfig(CostModelBaseConfig):
             (i.e., kW*h or kg). If not provided, defaults to commodity_rate_units*h.
     """
 
-    energy_capex: float | int = field(validator=gte_zero)
-    power_capex: float | int = field(validator=gte_zero)
-    opex_fraction: float = field(validator=range_val(0, 1))
+    energy_capex: float | int = field(validator=validators.ge(0))
+    power_capex: float | int = field(validator=validators.ge(0))
+    opex_fraction: float = field(validator=(validators.ge(0), validators.le(1)))
     max_capacity: float = field()
     max_charge_rate: float = field()
-    commodity_rate_units: str = field(validator=contains(["W", "kW", "MW", "GW", "TW"]))
+    commodity_rate_units: str = field(validator=validators.in_(["W", "kW", "MW", "GW", "TW"]))
     commodity_amount_units: str = field(default=None)
 
     def __attrs_post_init__(self):
@@ -89,32 +88,33 @@ class ATBBatteryCostModel(CostModelBaseClass):
         )
 
     def compute(self, inputs, outputs, discrete_inputs, discrete_outputs):
-        storage_duration_hrs = 0.0
+        if not discrete_inputs["skip_compute"]:
+            storage_duration_hrs = 0.0
 
-        # convert the input capacity to units of kW*h
-        max_capacity_kWh = units.convert_units(
-            inputs["storage_capacity"], self.config.commodity_amount_units, "kW*h"
-        )
-
-        # convert the input charge rate to units of kW
-        max_charge_rate_kW = units.convert_units(
-            inputs["max_charge_rate"], self.config.commodity_rate_units, "kW"
-        )
-
-        if max_charge_rate_kW > 0:
-            storage_duration_hrs = max_capacity_kWh / max_charge_rate_kW
-        if max_charge_rate_kW < 0:
-            msg = (
-                f"max_charge_rate cannot be less than zero and has value of "
-                f"{max_charge_rate_kW} kW"
+            # convert the input capacity to units of kW*h
+            max_capacity_kWh = units.convert_units(
+                inputs["storage_capacity"], self.config.commodity_amount_units, "kW*h"
             )
-            raise UserWarning(msg)
-        # CapEx equation from Cell E29
-        total_system_cost = (
-            storage_duration_hrs * self.config.energy_capex
-        ) + self.config.power_capex
-        capex = total_system_cost * max_charge_rate_kW
-        # OpEx equation from cells in the Fixed Operation and Maintenance Expenses section
-        opex = self.config.opex_fraction * capex
-        outputs["CapEx"] = capex
-        outputs["OpEx"] = opex
+
+            # convert the input charge rate to units of kW
+            max_charge_rate_kW = units.convert_units(
+                inputs["max_charge_rate"], self.config.commodity_rate_units, "kW"
+            )
+
+            if max_charge_rate_kW > 0:
+                storage_duration_hrs = max_capacity_kWh / max_charge_rate_kW
+            if max_charge_rate_kW < 0:
+                msg = (
+                    f"max_charge_rate cannot be less than zero and has value of "
+                    f"{max_charge_rate_kW} kW"
+                )
+                raise UserWarning(msg)
+            # CapEx equation from Cell E29
+            total_system_cost = (
+                storage_duration_hrs * self.config.energy_capex
+            ) + self.config.power_capex
+            capex = total_system_cost * max_charge_rate_kW
+            # OpEx equation from cells in the Fixed Operation and Maintenance Expenses section
+            opex = self.config.opex_fraction * capex
+            outputs["CapEx"] = capex
+            outputs["OpEx"] = opex

@@ -37,7 +37,7 @@ requires-python = ">=3.11, <3.14"
 license = {file = "LICENSE"}
 dependencies = [
   "attrs",
-  "CoolProp<7.0.0",
+  "CoolProp",
   "geopy",
   "jsonschema",
   "marine-carbon-management",
@@ -51,6 +51,7 @@ dependencies = [
   "pint",
   "ProFAST",
   "Pyomo>=6.1.2",
+  "pyfluids>=4.0",
   "rainflow",
   "requests",
   "requests-cache",
@@ -58,12 +59,12 @@ dependencies = [
   "rich>=13.7.0",
   "ruamel.yaml",
   "scipy",
-  "orbit-nrel",
   "floris",
   "timezonefinder==6.5.9",
   "turbine-models>=0.2.1",
   "wombat>=0.13.3",
   "charset_normalizer==3.4.9",
+  "statsmodels==0.14.6",
 ]
 keywords = [
     "python3",

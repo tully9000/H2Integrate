@@ -6,7 +6,6 @@ import openmdao.api as om
 from attrs import field, define, validators
 
 from h2integrate.core.utilities import BaseConfig
-from h2integrate.core.validators import gte_zero, range_val_or_none
 
 
 @define(kw_only=True)
@@ -65,15 +64,29 @@ class OpenLoopControlBaseConfig(BaseConfig):
     require_storage_parameters: ClassVar[bool] = False
 
     max_capacity: float | None = field(default=None)
-    max_soc_fraction: float | None = field(default=None, validator=range_val_or_none(0, 1))
-    min_soc_fraction: float | None = field(default=None, validator=range_val_or_none(0, 1))
-    init_soc_fraction: float | None = field(default=None, validator=range_val_or_none(0, 1))
-    max_charge_rate: float | None = field(default=None, validator=validators.optional(gte_zero))
+    max_soc_fraction: float | None = field(
+        default=None, validator=validators.optional((validators.ge(0), validators.le(1)))
+    )
+    min_soc_fraction: float | None = field(
+        default=None, validator=validators.optional((validators.ge(0), validators.le(1)))
+    )
+    init_soc_fraction: float | None = field(
+        default=None, validator=validators.optional((validators.ge(0), validators.le(1)))
+    )
+    max_charge_rate: float | None = field(
+        default=None, validator=validators.optional(validators.ge(0))
+    )
     charge_equals_discharge: bool = field(default=True)
     max_discharge_rate: float | None = field(default=None)
-    charge_efficiency: float | None = field(default=None, validator=range_val_or_none(0, 1))
-    discharge_efficiency: float | None = field(default=None, validator=range_val_or_none(0, 1))
-    round_trip_efficiency: float | None = field(default=None, validator=range_val_or_none(0, 1))
+    charge_efficiency: float | None = field(
+        default=None, validator=validators.optional((validators.ge(0), validators.le(1)))
+    )
+    discharge_efficiency: float | None = field(
+        default=None, validator=validators.optional((validators.ge(0), validators.le(1)))
+    )
+    round_trip_efficiency: float | None = field(
+        default=None, validator=validators.optional((validators.ge(0), validators.le(1)))
+    )
 
     def __attrs_post_init__(self):
         if self.commodity_amount_units is None:
@@ -160,10 +173,19 @@ class OpenLoopControlBase(om.ExplicitComponent):
 
     def setup(self):
         self.n_timesteps = int(self.options["plant_config"]["plant"]["simulation"]["n_timesteps"])
+        # n_steps_per_compute is the number of timesteps simulated per compute call
+        self.n_steps_per_compute = int(
+            self.options["plant_config"]["plant"]["simulation"].get(
+                "n_steps_per_compute", self.n_timesteps
+            )
+        )
 
         commodity = self.config.commodity
 
         demand_data = self.config.demand_profile
+
+        # The index to start the simulation slice when compute is called.
+        self.add_input("timestep_index", val=0, desc="Time step index")
 
         self.add_input(
             f"{commodity}_set_point",
@@ -188,6 +210,20 @@ class OpenLoopControlBase(om.ExplicitComponent):
             units=self.config.commodity_rate_units,
             desc=f"Dispatch commands for {commodity} storage",
         )
+
+    def _get_compute_time_range(self, time_index):
+        """
+        This method gets the range of timestep indices that are simulated in a
+        single call to compute call.
+
+        Args:
+            time_index (numpy array): Starting time index of the simulation range.
+
+        Returns:
+            range: range of time indices
+        """
+        ti = int(time_index[0])
+        return range(ti, ti + self.n_steps_per_compute)
 
     def compute():
         """This method must be implemented by subclasses to define the

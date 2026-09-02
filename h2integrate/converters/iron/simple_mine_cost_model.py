@@ -1,19 +1,18 @@
 import copy
 
 import pandas as pd
-from attrs import field, define
+from attrs import field, define, validators
 from openmdao.utils import units
 
 from h2integrate import ROOT_DIR
 from h2integrate.core.utilities import BaseConfig, merge_shared_inputs
-from h2integrate.core.validators import contains, range_val
 from h2integrate.core.model_baseclasses import CostModelBaseClass
 from h2integrate.tools.inflation.inflate import inflate_cpi
 
 
 @define(kw_only=True)
-class MartinIronMineCostConfig(BaseConfig):
-    """Configuration class for MartinIronMineCostComponent.
+class SimpleIronMineCostConfig(BaseConfig):
+    """Configuration class for SimpleIronMineCostComponent.
 
     Attributes:
         taconite_pellet_type (str): type of taconite pellets, options are "std" or "drg".
@@ -28,17 +27,19 @@ class MartinIronMineCostConfig(BaseConfig):
     max_ore_production_rate_tonnes_per_hr: float = field()
 
     taconite_pellet_type: str = field(
-        converter=(str.lower, str.strip), validator=contains(["std", "drg"])
+        converter=(str.lower, str.strip), validator=validators.in_(["std", "drg"])
     )
 
-    mine: str = field(validator=contains(["Hibbing", "Northshore", "United", "Minorca", "Tilden"]))
+    mine: str = field(
+        validator=validators.in_(["Hibbing", "Northshore", "United", "Minorca", "Tilden"])
+    )
 
     # the cost model is based on costs from 2021 and can be adjusted to another cost year
     # using CPI adjustment.
-    cost_year: int = field(converter=int, validator=range_val(2010, 2024))
+    cost_year: int = field(converter=int, validator=(validators.ge(2010), validators.le(2024)))
 
 
-class MartinIronMineCostComponent(CostModelBaseClass):
+class SimpleIronMineCostComponent(CostModelBaseClass):
     _time_step_bounds = (
         3600,
         3600,
@@ -75,7 +76,7 @@ class MartinIronMineCostComponent(CostModelBaseClass):
             self.target_dollar_year = 2024
 
         config_dict.update({"cost_year": self.target_dollar_year})
-        self.config = MartinIronMineCostConfig.from_dict(
+        self.config = SimpleIronMineCostConfig.from_dict(
             config_dict,
             strict=True,
             additional_cls_name=self.__class__.__name__,
@@ -98,7 +99,7 @@ class MartinIronMineCostComponent(CostModelBaseClass):
             desc="Iron ore pellets produced",
         )
 
-        coeff_fpath = ROOT_DIR / "converters" / "iron" / "martin_ore" / "cost_coeffs.csv"
+        coeff_fpath = ROOT_DIR / "converters" / "iron" / "simple_ore" / "cost_coeffs.csv"
         # martin ore performance model
         coeff_df = pd.read_csv(coeff_fpath, index_col=0)
         self.coeff_df = self.format_coeff_df(coeff_df, self.config.mine)
