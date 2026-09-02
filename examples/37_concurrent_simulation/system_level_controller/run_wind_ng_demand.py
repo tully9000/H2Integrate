@@ -17,8 +17,10 @@ from comparison_tools import Profiler
 
 # Run one of both simulation paradigms by changing the flags in this dict
 run_dict = {
-    "run_sequential": True,
-    "run_concurrent": True,
+    # "run_sequential": True,
+    # "run_concurrent": True,
+    # "run_sequential_opt": True,
+    "run_concurrent_opt": True,
 }
 
 
@@ -146,3 +148,70 @@ if run_dict.get("run_sequential", False) and run_dict.get("run_concurrent", Fals
 
     print(in_abs)
     print(out_abs)
+
+
+if run_dict.get("run_sequential_opt", False) or run_dict.get("run_concurrent_opt", False):
+    opt_params = {
+        "driver": {
+            "optimization": {
+                "flag": True,
+                "solver": "COBYLA",
+                "tol": 0.001,
+                "catol": 15000,
+                "max_iter": 100,
+                "rhobeg": 10,
+                "debug_print": True,
+            }
+        },
+        "design_variables": {
+            "battery": {
+                "storage_capacity": {"flag": True, "lower": 50000, "upper": 100000, "units": "kW*h"}
+            }
+        },
+        "objective": {
+            "name": "plant.finance_subgroup_electricity.electricity_finance_profast_lco.LCOE"
+        },
+        "recorder": {
+            "flag": True,
+            "file": "wind_ng_demand_opt.sql",
+            "includes": ["*"],
+            "excludes": ["wind_resource.wind_resource_data"],
+        },
+    }
+
+if run_dict.get("run_sequential_opt", False):
+    config_seq = deepcopy(config)
+    config_seq["plant_config"]["plant"]["simulation"]["n_timesteps"] = 8760
+    config_seq["plant_config"]["plant"]["simulation"]["n_steps_per_compute"] = 8760
+
+    config_seq["driver_config"].update(opt_params)
+
+    # Create an H2I model for standard year-long simulation
+    h2i_seq = H2IntegrateModel(config_seq)
+
+    # Run the model
+    h2i_seq.run()
+
+    # Post-process the results
+    h2i_seq.post_process(print_results=False)
+
+
+if run_dict.get("run_concurrent_opt", False):
+    config_con = deepcopy(config)
+
+    config_con["plant_config"]["plant"]["simulation"]["n_timesteps"] = 8760
+    config_con["plant_config"]["plant"]["simulation"]["n_steps_per_compute"] = 12
+
+    config_con["driver_config"].update(opt_params)
+
+    # Create an H2I model for steppable simulation
+    h2i_con = H2IntegrateModel(config_con)
+
+    h2i_con.plant.nonlinear_solver = ConcurrentPlantNLBGSSolver(h2i_con.plant_config)
+    h2i_con.plant.nonlinear_solver.options["iprint"] = 0
+
+    # Run the model
+    h2i_con.run()
+
+    # Post-process the results
+    h2i_con.post_process(print_results=False)
