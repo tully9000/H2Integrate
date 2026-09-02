@@ -7,6 +7,8 @@ import yaml
 import matplotlib.pyplot as plt
 
 from h2integrate import H2IntegrateModel, load_tech_yaml, load_plant_yaml, load_driver_yaml
+from h2integrate.core.dict_utils import percent_diff_dicts, find_nonzero_percent_diffs
+from h2integrate.core.concurrent_nl_solver import ConcurrentPlantNLBGSSolver
 
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
@@ -80,10 +82,13 @@ if run_dict.get("run_concurrent", False):
     config_con = deepcopy(config)
 
     config_con["plant_config"]["plant"]["simulation"]["n_timesteps"] = 8760
-    config_con["plant_config"]["plant"]["simulation"]["n_steps_per_compute"] = 1
+    config_con["plant_config"]["plant"]["simulation"]["n_steps_per_compute"] = 12
 
     # Create an H2I model for steppable simulation
     h2i_con = H2IntegrateModel(config_con)
+
+    h2i_con.plant.nonlinear_solver = ConcurrentPlantNLBGSSolver(h2i_con.plant_config)
+    h2i_con.plant.nonlinear_solver.options["iprint"] = 0
 
     t0 = time.time()
     # Run the model
@@ -129,3 +134,15 @@ ax[0].axhline(60, color="black", linewidth=1)
 
 ax[0].set_xlim([-5, 30])
 ax[1].set_ylim([-12345.6, -12345.7])
+
+
+# Compare results
+if run_dict.get("run_sequential", False) and run_dict.get("run_concurrent", False):
+    inputs_pd_dict = percent_diff_dicts(inputs_seq, inputs_con)
+    outputs_pd_dict = percent_diff_dicts(outputs_seq, outputs_con)
+
+    in_abs, in_rel = find_nonzero_percent_diffs(inputs_pd_dict, dict(inputs_seq))
+    out_abs, out_rel = find_nonzero_percent_diffs(outputs_pd_dict, dict(outputs_seq))
+
+    print(in_abs)
+    print(out_abs)

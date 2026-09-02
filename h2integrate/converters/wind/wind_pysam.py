@@ -454,7 +454,7 @@ class PYSAMWindPlantPerformanceModel(WindPerformanceBaseClass):
     def _compute_outputs(self, inputs, outputs, discrete_inputs, discrete_outputs):
         simulation_range = self._get_compute_time_range(inputs["timestep_index"])
 
-        outputs["electricity_out"] = self.system_model.Outputs.gen[
+        outputs["electricity_out"][simulation_range] = self.system_model.Outputs.gen[
             simulation_range.start : simulation_range.stop
         ]
         outputs["rated_electricity_production"] = self.system_model.Farm.system_capacity

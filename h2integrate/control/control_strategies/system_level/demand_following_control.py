@@ -93,19 +93,19 @@ class DemandFollowingControl(SystemLevelControlBase):
                     remaining_demand[simulation_range] / n_dispatchable
                 )
 
-        if (int(inputs["timestep_index"][0]) < 25) and (int(inputs["timestep_index"][0]) > 0):
-            current_SOC = inputs["SOC"][int(inputs["timestep_index"][0])]
+        # if (int(inputs["timestep_index"][0]) < 250) and (int(inputs["timestep_index"][0]) > 0):
+        #     current_SOC = inputs["SOC"][int(inputs["timestep_index"][0])]
 
-            if (current_SOC > 0.4) and (current_SOC < 0.6):
-                # outputs["battery_electricity_set_point"]
-                # [int(inputs["timestep_index"][0])+1] = -12345.6789
-                outputs["battery_electricity_set_point"][
-                    int(inputs["timestep_index"][0])
-                ] = -12345.6789
+        #     if (current_SOC > 0.4) and (current_SOC < 0.6):
+        #         # outputs["battery_electricity_set_point"]
+        #         # [int(inputs["timestep_index"][0])+1] = -12345.6789
+        #         outputs["battery_electricity_set_point"][
+        #             int(inputs["timestep_index"][0])
+        #         ] = -12345.6789
 
-        # else:
+        # # else:
 
-        if int(inputs["timestep_index"][0]) < self.n_timesteps - 1:
-            outputs["battery_electricity_set_point"][int(inputs["timestep_index"][0]) + 1] = (
-                outputs["battery_electricity_set_point"][int(inputs["timestep_index"][0])]
-            )
+        # if int(inputs["timestep_index"][0]) < self.n_timesteps - 1:
+        #     outputs["battery_electricity_set_point"][int(inputs["timestep_index"][0]) + 1] = (
+        #         outputs["battery_electricity_set_point"][int(inputs["timestep_index"][0])]
+        #     )
