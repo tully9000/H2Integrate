@@ -349,6 +349,8 @@ class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
             self.system_model.Outputs.gen[simulation_range.start : simulation_range.stop]
         )  # kW-dc
 
+        # print(np.linalg.norm(self.system_model.Outputs.gen))
+
         pv_capacity_kWdc = self.system_model.value("system_capacity")
         dc_ac_ratio = self.system_model.value("dc_ac_ratio")
         outputs["system_capacity_AC"] = pv_capacity_kWdc / dc_ac_ratio
@@ -363,7 +365,7 @@ class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
         outputs["annual_electricity_produced"] = self.system_model.value("ac_annual")
 
         # Apply curtailment based on set_point
-        self.apply_curtailment(outputs)
+        self.apply_curtailment(inputs, outputs)
 
     def compute(self, inputs, outputs, discrete_inputs, discrete_outputs):
         if inputs["system_capacity_DC"][0] <= 0:
@@ -373,10 +375,10 @@ class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
             outputs["total_electricity_produced"] = 0.0
             outputs["annual_electricity_produced"] = 0.0
             outputs["capacity_factor"] = 0.0
-            self.apply_curtailment(outputs)
+            self.apply_curtailment(inputs, outputs)
             return
 
-        if not self._PYSAM_model_has_been_executed:
+        if not self._PYSAM_model_has_been_executed and (inputs["timestep_index"][0] == 0):
             assert (
                 inputs["timestep_index"] == 0
             ), "PYSAM model should only be executed at the start of the simulation"

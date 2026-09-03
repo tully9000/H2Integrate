@@ -180,7 +180,7 @@ class NaturalGasPerformanceModel(PerformanceModelBaseClass):
 
         outputs["electricity_out"][simulation_range] = electricity_out
         outputs["natural_gas_consumed"][simulation_range] = natural_gas_consumed
-        outputs["electricity_headroom_out"] = np.minimum(  # we are limitied by either
+        outputs["electricity_headroom_out"][simulation_range] = np.minimum(  # we are limitied by either
             natural_gas_available / heat_rate_mmbtu_per_mwh,  # the power available in the natural gas supply
             system_capacity,  # or the rated power of the system
         ) - electricity_out  # and subtracting out what we're using gives the available excess capacity

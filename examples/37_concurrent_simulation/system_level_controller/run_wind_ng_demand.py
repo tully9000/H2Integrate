@@ -6,20 +6,23 @@ from pathlib import Path
 import yaml
 import matplotlib.pyplot as plt
 
-from h2integrate import H2IntegrateModel, load_tech_yaml, load_plant_yaml, load_driver_yaml
+from h2integrate import (
+    H2IntegrateModel,
+    load_tech_yaml,
+    load_plant_yaml,
+    load_driver_yaml,
+)
 from h2integrate.core.dict_utils import percent_diff_dicts, find_nonzero_percent_diffs
 from h2integrate.core.concurrent_nl_solver import ConcurrentPlantNLBGSSolver
-
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 from comparison_tools import Profiler
 
-
 # Run one of both simulation paradigms by changing the flags in this dict
 run_dict = {
-    # "run_sequential": True,
-    # "run_concurrent": True,
-    # "run_sequential_opt": True,
+    "run_sequential": True,
+    "run_concurrent": True,
+    "run_sequential_opt": True,
     "run_concurrent_opt": True,
 }
 
@@ -61,16 +64,16 @@ if run_dict.get("run_sequential", False):
     inputs_seq = dict(h2i_seq.model.list_inputs(out_stream=None))
     outputs_seq = dict(h2i_seq.model.list_outputs(out_stream=None))
 
-    SLC_battery_cmd = outputs_seq["plant.system_level_controller.battery_electricity_set_point"][
-        "val"
-    ]
+    SLC_battery_cmd = outputs_seq[
+        "plant.system_level_controller.battery_electricity_set_point"
+    ]["val"]
 
     battery_out = outputs_seq[
         "plant.battery.StoragePerformanceModel.storage_electricity_discharge"
     ]["val"]
-    battery_cmd = inputs_seq["plant.battery.StoragePerformanceModel.electricity_command_value"][
-        "val"
-    ]
+    battery_cmd = inputs_seq[
+        "plant.battery.StoragePerformanceModel.electricity_command_value"
+    ]["val"]
 
     battery_SOC = outputs_seq["plant.battery.StoragePerformanceModel.SOC"]["val"]
 
@@ -109,16 +112,16 @@ if run_dict.get("run_concurrent", False):
     inputs_con = dict(h2i_con.model.list_inputs(out_stream=None))
     outputs_con = dict(h2i_con.model.list_outputs(out_stream=None))
 
-    SLC_battery_cmd = outputs_con["plant.system_level_controller.battery_electricity_set_point"][
-        "val"
-    ]
+    SLC_battery_cmd = outputs_con[
+        "plant.system_level_controller.battery_electricity_set_point"
+    ]["val"]
 
     battery_out = outputs_con[
         "plant.battery.StoragePerformanceModel.storage_electricity_discharge"
     ]["val"]
-    battery_cmd = inputs_con["plant.battery.StoragePerformanceModel.electricity_command_value"][
-        "val"
-    ]
+    battery_cmd = inputs_con[
+        "plant.battery.StoragePerformanceModel.electricity_command_value"
+    ]["val"]
 
     battery_SOC = outputs_con["plant.battery.StoragePerformanceModel.SOC"]["val"]
 
@@ -150,7 +153,9 @@ if run_dict.get("run_sequential", False) and run_dict.get("run_concurrent", Fals
     print(out_abs)
 
 
-if run_dict.get("run_sequential_opt", False) or run_dict.get("run_concurrent_opt", False):
+if run_dict.get("run_sequential_opt", False) or run_dict.get(
+    "run_concurrent_opt", False
+):
     opt_params = {
         "driver": {
             "optimization": {
@@ -165,7 +170,12 @@ if run_dict.get("run_sequential_opt", False) or run_dict.get("run_concurrent_opt
         },
         "design_variables": {
             "battery": {
-                "storage_capacity": {"flag": True, "lower": 50000, "upper": 100000, "units": "kW*h"}
+                "storage_capacity": {
+                    "flag": True,
+                    "lower": 50000,
+                    "upper": 100000,
+                    "units": "kW*h",
+                }
             }
         },
         "objective": {
@@ -175,7 +185,6 @@ if run_dict.get("run_sequential_opt", False) or run_dict.get("run_concurrent_opt
             "flag": True,
             "file": "wind_ng_demand_opt.sql",
             "includes": ["*"],
-            "excludes": ["wind_resource.wind_resource_data"],
         },
     }
 
@@ -184,7 +193,7 @@ if run_dict.get("run_sequential_opt", False):
     config_seq["plant_config"]["plant"]["simulation"]["n_timesteps"] = 8760
     config_seq["plant_config"]["plant"]["simulation"]["n_steps_per_compute"] = 8760
 
-    config_seq["driver_config"].update(opt_params)
+    config_seq["driver_config"].update(deepcopy(opt_params))
 
     # Create an H2I model for standard year-long simulation
     h2i_seq = H2IntegrateModel(config_seq)
@@ -202,7 +211,7 @@ if run_dict.get("run_concurrent_opt", False):
     config_con["plant_config"]["plant"]["simulation"]["n_timesteps"] = 8760
     config_con["plant_config"]["plant"]["simulation"]["n_steps_per_compute"] = 12
 
-    config_con["driver_config"].update(opt_params)
+    config_con["driver_config"].update(deepcopy(opt_params))
 
     # Create an H2I model for steppable simulation
     h2i_con = H2IntegrateModel(config_con)
@@ -215,3 +224,5 @@ if run_dict.get("run_concurrent_opt", False):
 
     # Post-process the results
     h2i_con.post_process(print_results=False)
+
+    pass

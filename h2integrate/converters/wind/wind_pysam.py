@@ -470,7 +470,7 @@ class PYSAMWindPlantPerformanceModel(WindPerformanceBaseClass):
         outputs["capacity_factor"] = outputs["total_electricity_produced"] / max_production
 
         # Apply curtailment based on set_point
-        self.apply_curtailment(outputs)
+        self.apply_curtailment(inputs, outputs)
 
     def compute(self, inputs, outputs, discrete_inputs, discrete_outputs):
         rotor_diameter = inputs["rotor_diameter"][0]
@@ -483,7 +483,7 @@ class PYSAMWindPlantPerformanceModel(WindPerformanceBaseClass):
             outputs["total_electricity_produced"] = 0.0
             outputs["annual_electricity_produced"] = 0.0
             outputs["capacity_factor"] = 0.0
-            self.apply_curtailment(outputs)
+            self.apply_curtailment(inputs, outputs)
             return
 
         if not self._PYSAM_model_has_been_executed:
