@@ -376,7 +376,7 @@ class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
             self.apply_curtailment(outputs)
             return
 
-        if not self._PYSAM_model_has_been_executed:
+        if not self._PYSAM_model_has_been_executed and (inputs["timestep_index"][0] == 0):
             assert (
                 inputs["timestep_index"] == 0
             ), "PYSAM model should only be executed at the start of the simulation"

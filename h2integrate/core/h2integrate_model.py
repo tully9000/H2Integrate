@@ -1960,7 +1960,7 @@ class H2IntegrateModel:
                     raise AssertionError("n_timesteps must be divisible by n_steps_per_compute")
 
                 # Assign custom nonlinear solver to plant group to manage concurrent simulation
-                self.plant.nonlinear_solver = ConcurrentPlantNLSolver(
+                self.plant.nonlinear_solver = ConcurrentPlantNLBGSSolver(
                     plant_config=self.plant_config
                 )
 

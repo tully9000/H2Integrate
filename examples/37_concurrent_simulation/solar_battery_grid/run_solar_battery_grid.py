@@ -58,7 +58,7 @@ if run_dict.get("run_concurrent", False):
     config_con = deepcopy(config)
 
     config_con["plant_config"]["plant"]["simulation"]["n_timesteps"] = 8760
-    config_con["plant_config"]["plant"]["simulation"]["n_steps_per_compute"] = 1
+    config_con["plant_config"]["plant"]["simulation"]["n_steps_per_compute"] = 24
 
     # Create an H2I model for steppable simulation
     h2i_con = H2IntegrateModel(config_con)
