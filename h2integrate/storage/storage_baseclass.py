@@ -456,7 +456,11 @@ class StoragePerformanceBase(PerformanceModelBaseClass):
         else:
             soc = self._soc_timeseries[sim_start_index - 1]
 
+        # storage_capacity_base = storage_capacity.copy()
+
+
         for t, cmd in enumerate(commands):
+            # storage_capacity = (1 - 0.1 * (t/8760)) * storage_capacity_base
             if cmd < 0.0:
                 # --- Charging ---
                 # headroom: how much more commodity the storage can accept,

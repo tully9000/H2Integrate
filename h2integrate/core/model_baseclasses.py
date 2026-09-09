@@ -158,13 +158,12 @@ class PerformanceModelBaseClass(om.ExplicitComponent):
             uncurtailed_key = f"uncurtailed_{self.commodity}_out"
             command_value_key = f"{self.commodity}_command_value"
 
-            uncurtailed = np.array(outputs[commodity_out_key])
-            outputs[uncurtailed_key] = uncurtailed
+            uncurtailed = np.array(outputs[commodity_out_key][simulation_range])
+            outputs[uncurtailed_key][simulation_range] = uncurtailed
 
-            print(np.linalg.norm(uncurtailed))
-
-            command_value = self._inputs[command_value_key]
-            outputs[commodity_out_key] = np.minimum(uncurtailed, command_value)
+            # command_value = self._inputs[command_value_key]
+            command_value = inputs[command_value_key][simulation_range]
+            outputs[commodity_out_key][simulation_range] = np.minimum(uncurtailed, command_value)
 
     def compute(self, inputs, outputs, discrete_inputs, discrete_outputs):
         """
