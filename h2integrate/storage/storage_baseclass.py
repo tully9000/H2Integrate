@@ -51,8 +51,6 @@ class StoragePerformanceBase(PerformanceModelBaseClass):
     )  # (min, max) time step lengths (in seconds) compatible with this model
     _control_classifier = "storage"
 
-    _soc_timeseries = np.zeros(8760)  # state of charge storage array
-
     def setup(self):
         """Set up the storage performance model in OpenMDAO.
 
@@ -80,11 +78,9 @@ class StoragePerformanceBase(PerformanceModelBaseClass):
         # Initialize soc to the value in the config, if given or halfway between
         # the minimum and maximum limits otherwise.
         if hasattr(self.config, "init_soc_fraction"):
-            soc_init = self.config.init_soc_fraction
+            self.soc_init = self.config.init_soc_fraction
         else:
-            soc_init = (1 / 2) * (self.config.min_soc_fraction + self.config.max_soc_fraction)
-
-        self._soc_timeseries[0] = soc_init
+            self.soc_init = self.config.min_soc_fraction
 
         # Input timeseries
         self.add_input(
@@ -229,7 +225,7 @@ class StoragePerformanceBase(PerformanceModelBaseClass):
         # Below is an example of what the compute method would look like in the
         # StoragePerformanceModel
         # Do whatever pre-calculations are necessary, then run storage
-        # self.current_soc = self.config.init_soc_fraction
+        # self.soc_init = self.config.init_soc_fraction
 
         # charge_rate = inputs["max_charge_rate"][0]
         # if "max_discharge_rate" in inputs:
@@ -250,7 +246,7 @@ class StoragePerformanceBase(PerformanceModelBaseClass):
 
         Example:
             >>> # In the `compute()` method:
-            >>> self.current_soc = self.config.init_soc_fraction
+            >>> self.soc_init = self.config.init_soc_fraction
             >>> charge_rate = inputs["max_charge_rate"][0]
             >>> discharge_rate = inputs["max_discharge_rate"][0]
             >>> storage_capacity = inputs["storage_capacity"]
@@ -431,7 +427,7 @@ class StoragePerformanceBase(PerformanceModelBaseClass):
         # Early return when storage cannot operate: zero capacity or both
         # charge and discharge rates are zero.
         if storage_capacity <= 0 or (charge_rate <= 0 and discharge_rate <= 0):
-            soc_timesteps[:] = self.current_soc * 100.0
+            soc_timesteps[:] = self.soc_init * 100.0
             return storage_commodity_out_timesteps, soc_timesteps
 
         # Pre-compute scalar constants to avoid repeated attribute lookups
@@ -449,10 +445,7 @@ class StoragePerformanceBase(PerformanceModelBaseClass):
             commands = np.asarray(storage_dispatch_commands, dtype=float)
 
         if sim_start_index == 0:
-            if hasattr(self.config, "init_soc_fraction"):
-                soc = self.config.init_soc_fraction
-            else:
-                soc = self._soc_timeseries[0]
+            soc = self.soc_init
         else:
             soc = self._soc_timeseries[sim_start_index - 1]
 
@@ -506,7 +499,6 @@ class StoragePerformanceBase(PerformanceModelBaseClass):
 
         # Persist the final SOC so subsequent simulate() calls (e.g. from the
         # Pyomo controller across rolling windows) start where we left off.
-        self.current_soc = soc
         self._soc_timeseries[sim_start_index:sim_end_index] = soc_timesteps / 100
 
         return storage_commodity_out_timesteps, soc_timesteps

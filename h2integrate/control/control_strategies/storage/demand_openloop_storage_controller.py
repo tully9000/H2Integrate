@@ -49,8 +49,6 @@ class DemandOpenLoopStorageController(OpenLoopControlBase):
         3600,
     )  # (min, max) time step lengths (in seconds) compatible with this model
 
-    _soc_timeseries = np.zeros(8760)  # state of charge storage array
-
     def setup(self):
         self.config = DemandOpenLoopStorageControllerConfig.from_dict(
             merge_shared_inputs(self.options["tech_config"]["model_inputs"], "control"),
@@ -65,11 +63,9 @@ class DemandOpenLoopStorageController(OpenLoopControlBase):
         # Initialize soc to the value in the config, if given or halfway between
         # the minimum and maximum limits otherwise.
         if hasattr(self.config, "init_soc_fraction"):
-            soc_init = self.config.init_soc_fraction
+            self.soc_init = self.config.init_soc_fraction
         else:
-            soc_init = (1 / 2) * (self.config.min_soc_fraction + self.config.max_soc_fraction)
-
-        self._soc_timeseries[0] = soc_init
+            self.soc_init = self.config.min_soc_fraction
 
         # Design constraints of storage system
         self.add_input(
@@ -157,10 +153,7 @@ class DemandOpenLoopStorageController(OpenLoopControlBase):
         # Initialize time-step state of charge prior to loop so the loop starts with
         # the previous time step's value
         if simulation_range.start == 0:
-            if hasattr(self.config, "init_soc_fraction"):
-                soc = self.config.init_soc_fraction
-            else:
-                soc = self._soc_timeseries[0]
+            soc = self.soc_init
         else:
             soc = self._soc_timeseries[simulation_range.start - 1]
 
