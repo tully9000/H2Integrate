@@ -44,6 +44,16 @@ plant:
     n_timesteps: 8760
     n_steps_per_compute: 24
     # n_steps_per_compute: 8760
+# Proposed replacement architecture. While disabled, this only creates an
+# inspectable execution plan and leaves the existing example behavior unchanged.
+rolling_horizon:
+  enabled: true
+  prediction_horizon: 48
+  control_interval: 24
+  steppable_technologies: [battery, bat_combiner, electrical_load_demand, grid_buy, grid_sell]
+  initial_states:
+    battery:
+      soc: 0.1
 finance_parameters:
   finance_groups:
     profast_model:
