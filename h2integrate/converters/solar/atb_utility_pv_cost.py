@@ -30,6 +30,8 @@ class ATBUtilityPVCostModel(CostModelBaseClass):
         3600,
     )  # (min, max) time step lengths (in seconds) compatible with this model
 
+    _is_steppable = True
+
     def setup(self):
         self.config = ATBUtilityPVCostModelConfig.from_dict(
             merge_shared_inputs(self.options["tech_config"]["model_inputs"], "cost"),
@@ -40,9 +42,8 @@ class ATBUtilityPVCostModel(CostModelBaseClass):
         self.add_input("system_capacity_AC", val=0.0, units="kW", desc="PV rated capacity in AC")
 
     def compute(self, inputs, outputs, discrete_inputs, discrete_outputs):
-        if not discrete_inputs["skip_compute"]:
-            capacity = inputs["system_capacity_AC"][0]
-            capex = self.config.capex_per_kWac * capacity
-            opex = self.config.opex_per_kWac_per_year * capacity
-            outputs["CapEx"] = capex
-            outputs["OpEx"] = opex
+        capacity = inputs["system_capacity_AC"][0]
+        capex = self.config.capex_per_kWac * capacity
+        opex = self.config.opex_per_kWac_per_year * capacity
+        outputs["CapEx"] = capex
+        outputs["OpEx"] = opex

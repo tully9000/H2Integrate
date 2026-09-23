@@ -1,7 +1,7 @@
 from collections.abc import Iterable
 
 import numpy as np
-from openmdao.utils.units import convert_units
+from openmdao.utils.units import convert_units, simplify_unit
 
 from h2integrate.finances.tools import _compute_rate_units
 from h2integrate.finances.profast_base import ProFastBase
@@ -86,7 +86,7 @@ class ProFastNPV(ProFastBase):
             units=self.commodity_sell_price_units,
         )
 
-    def compute(self, inputs, outputs, discrete_inputs, discrete_outputs):
+    def compute(self, inputs, outputs):
         """Compute the NPV of the commodity using ProFAST cash flows.
 
         Args:
@@ -96,41 +96,39 @@ class ProFastNPV(ProFastBase):
         Returns:
             None
         """
+        io_meta_data = self.get_io_metadata()
+        self.price_units = io_meta_data[f"sell_price_{self.output_txt}"]["units"]
+        self.commodity_amount_units = simplify_unit(f"USD/({self.price_units})")
 
-        if not discrete_inputs["skip_compute"]:
-            io_meta_data = self.get_io_metadata()
-            self.price_units = io_meta_data[f"sell_price_{self.output_txt}"]["units"]
-            self.commodity_amount_units = self.commodity_sell_price_units.replace("USD/", "").strip(
-                "()"
+        # compute rate_units from the price
+        rate_units_from_price = _compute_rate_units(
+            self.commodity_sell_price_units, check_conversion=False
+        )
+        rate_units_capacity = io_meta_data[f"rated_{self.options['commodity_type']}_production"][
+            "units"
+        ]
+        conversion_ratio = convert_units(1, rate_units_from_price, rate_units_capacity)
+
+        # ensure that sell price units are compatible with the rate units
+        if float(conversion_ratio) != 1.0:
+            # convert rate units to units compatible with the price_units
+            inputs_adjusted = dict(inputs.items())
+            capacity_converted = convert_units(
+                inputs[f"rated_{self.options['commodity_type']}_production"],
+                rate_units_capacity,
+                rate_units_from_price,
             )
-
-            # compute rate_units from the price
-            rate_units_from_price = _compute_rate_units(
-                self.commodity_sell_price_units, check_conversion=False
+            inputs_adjusted[f"rated_{self.options['commodity_type']}_production"] = (
+                capacity_converted
             )
-            rate_units_capacity = io_meta_data[
-                f"rated_{self.options['commodity_type']}_production"
-            ]["units"]
-            conversion_ratio = convert_units(1, rate_units_from_price, rate_units_capacity)
+            pf = self.populate_profast(inputs_adjusted)
+        else:
+            pf = self.populate_profast(inputs)
 
-            # ensure that sell price units are compatible with the rate units
-            if float(conversion_ratio) != 1.0:
-                # convert rate units to units compatible with the price_units
-                inputs_adjusted = dict(inputs.items())
-                capacity_converted = convert_units(
-                    inputs[f"rated_{self.options['commodity_type']}_production"],
-                    rate_units_capacity,
-                    rate_units_from_price,
-                )
-                inputs_adjusted[f"rated_{self.options['commodity_type']}_production"] = (
-                    capacity_converted
-                )
-                pf = self.populate_profast(inputs_adjusted)
-            else:
-                pf = self.populate_profast(inputs)
+        non_op_Nyears = int(np.ceil(self.params.installation_time / 12) + 1)
+        sell_price = inputs[f"sell_price_{self.output_txt}"]
+        # Use first operating-year price for pre-operation padding.
+        # ProFAST needs the non-zero price padding when installation time is not divisible by 12.
+        sell_profile = np.concatenate([np.full(non_op_Nyears, sell_price[0]), sell_price])
 
-            non_op_Nyears = int(np.ceil(self.params.installation_time / 12) + 1)
-            sell_profile = np.concatenate(
-                [np.zeros(non_op_Nyears), inputs[f"sell_price_{self.output_txt}"]]
-            )
-            outputs[f"NPV_{self.output_txt}"] = pf.cash_flow(price=sell_profile)
+        outputs[f"NPV_{self.output_txt}"] = pf.cash_flow(price=sell_profile)

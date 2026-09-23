@@ -188,6 +188,8 @@ class PYSAMWindPlantPerformanceModel(WindPerformanceBaseClass):
         3600,
     )  # (min, max) time step lengths (in seconds) compatible with this model
 
+    _is_steppable = True
+
     # Flag to avoid unnecessary re-calculation of PySAM model
     _PYSAM_model_has_been_executed = False
 

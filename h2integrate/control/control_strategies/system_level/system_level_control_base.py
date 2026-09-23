@@ -109,6 +109,7 @@ class SystemLevelControlBase(om.ExplicitComponent):
     - ``demand_commodity``: the commodity being controlled (e.g. "electricity")
     - ``demand_commodity_rate_units``: units string (or None) of the demand commodity
     - ``demand_tech``: name of the demand technology
+    - ``demand_profile``: default demand profile from the demand technology configuration
     - ``storage_techs_to_control``: dictionary with keys of the technology names. The value is True
         if the technology is classified as "storage" and has an attached controller.
         Otherwise the value is False.
@@ -137,6 +138,10 @@ class SystemLevelControlBase(om.ExplicitComponent):
       ancestors, so feedstocks behind intermediate components are included)
       and divide by the dispatchable tech's annualized total production.
     """
+
+    # Flag to indicate steppability. This flag should be overwritten by a subclass when that
+    # system level controller is capable of steppable simulation.
+    _is_steppable = False
 
     def initialize(self):
         self.options.declare("driver_config", types=dict)
@@ -184,9 +189,12 @@ class SystemLevelControlBase(om.ExplicitComponent):
 
         # Input: demand profile
         self.demand_input_name = f"{self.commodity}_demand"
+
+        # Demand has to be set to the same value to prevent an error
+        demand_val = slc_topology["demand_profile"]
         self.add_input(
             self.demand_input_name,
-            val=10.0,
+            val=demand_val,
             shape=self.n_timesteps,
             units=self.commodity_rate_units,
             desc=f"Demand profile of {self.commodity}",
