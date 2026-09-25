@@ -134,8 +134,6 @@ class DemandOpenLoopStorageController(OpenLoopControlBase):
 
         commodity = self.config.commodity
 
-        simulation_range = self._get_compute_time_range(inputs["timestep_index"])
-
         self.common_checks_needed_in_compute(inputs)
 
         max_capacity = inputs["storage_capacity"].item()

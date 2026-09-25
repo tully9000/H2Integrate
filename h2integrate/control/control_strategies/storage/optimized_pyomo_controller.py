@@ -108,6 +108,8 @@ class OptimizedDispatchStorageController(PyomoStorageControllerBaseClass):
         3600,
     )  # (min, max) time step lengths (in seconds) compatible with this model
 
+    _is_steppable = True
+
     def setup(self):
         """Initialize the optimized dispatch controller."""
         self.config = OptimizedDispatchStorageControllerConfig.from_dict(
@@ -129,7 +131,6 @@ class OptimizedDispatchStorageController(PyomoStorageControllerBaseClass):
         )
 
         self.n_timesteps = int(self.options["plant_config"]["plant"]["simulation"]["n_timesteps"])
-
         super().setup()
 
         self.n_control_window_hours = int(self.config.n_control_window_hours)
@@ -179,6 +180,7 @@ class OptimizedDispatchStorageController(PyomoStorageControllerBaseClass):
             performance_model: callable,
             performance_model_kwargs,
             inputs,
+            soc_timeseries=None,
             pyomo_model=self.pyomo_model,
             commodity_name: str = self.config.commodity,
         ):
@@ -224,12 +226,23 @@ class OptimizedDispatchStorageController(PyomoStorageControllerBaseClass):
                 1. Arrays returned have length self.n_timesteps (full simulation period).
             """
 
+            simulation_range = self._get_compute_time_range(inputs["timestep_index"])
+
             # initialize outputs
             storage_commodity_out = np.zeros(self.n_timesteps)
-            soc = np.zeros(self.n_timesteps)
+            if soc_timeseries is None:
+                soc = np.zeros(self.n_timesteps)
+            else:
+                soc = soc_timeseries
 
             # get the starting index for each control window
             window_start_indices = list(range(0, self.n_timesteps, self.n_control_window_hours))
+
+            window_start_indices = [
+                wsi
+                for wsi in window_start_indices
+                if ((wsi >= simulation_range.start) and (wsi < simulation_range.stop))
+            ]
 
             # Initialize parameters for optimized dispatch strategy
             self.initialize_parameters(inputs)
@@ -248,11 +261,23 @@ class OptimizedDispatchStorageController(PyomoStorageControllerBaseClass):
                 if t % (self.n_timesteps // 4) < self.n_control_window_hours:
                     percentage = round((t / self.n_timesteps) * 100)
                     print(f"{percentage}% done with optimal dispatch")
+
+                if t == 0:
+                    soc_init = self.config.init_soc_fraction
+                else:
+                    soc_init = soc[t - 1] / 100
+
+                if soc_init > self.config.max_soc_fraction:
+                    soc_init = self.config.max_soc_fraction
+                if soc_init < self.config.min_soc_fraction:
+                    soc_init = self.config.min_soc_fraction
+
                 # Update time series parameters for the optimization method
                 self.update_time_series_parameters(
                     commodity_in=commodity_in,
                     commodity_demand=demand_in,
-                    updated_initial_soc=self.updated_initial_soc,
+                    updated_initial_soc=soc_init,
+                    # updated_initial_soc=self.updated_initial_soc,
                 )
                 # Run dispatch optimization to minimize costs while meeting demand
                 self.solve_dispatch_model(
@@ -267,7 +292,54 @@ class OptimizedDispatchStorageController(PyomoStorageControllerBaseClass):
                     **performance_model_kwargs,
                     sim_start_index=t,
                     sim_end_index=t + self.n_control_window_hours,
+                    soc_init=soc_init,
                 )
+
+                if t < 50 or False:
+                    import matplotlib.pyplot as plt
+
+                    fig_label = f"start{t}"
+                    open_fig_labels = plt.get_figlabels()
+                    if fig_label in open_fig_labels:
+                        fig = plt.figure(fig_label)
+                        ax = fig.get_axes()
+                    else:
+                        fig, ax = plt.subplots(2, 2, sharex="all", layout="constrained")
+                        ax = np.ravel(ax)
+                        fig.suptitle(f"Start index: {t}")
+                        fig.set_label(f"start{t}")
+
+                    ax[0].plot(commodity_in)
+                    ax[0].set_title("Commodity in")
+                    ax[1].plot(demand_in)
+                    ax[1].set_title("Demand in")
+
+                    ax[2].plot(storage_commodity_out_control_window)
+                    ax[2].set_title("Storage commodity out")
+                    ax[3].plot(soc_control_window)
+                    ax[3].set_title("SOC")
+
+                    ax[3].set_ylim([0, 100])
+
+                    # ax[4].plot(self.storage_dispatch_commands)
+
+                if t == 96 or False:
+                    import matplotlib.pyplot as plt
+
+                    fig_label = f"soc{t}"
+                    open_fig_labels = plt.get_figlabels()
+                    if fig_label in open_fig_labels:
+                        fig = plt.figure(fig_label)
+                        ax = fig.get_axes()
+                    else:
+                        fig, ax = plt.subplots(1, 1, sharex="all", layout="constrained")
+                        # ax = np.ravel(ax)
+                        ax = [ax]
+                        fig.suptitle(f"Start index: {t}")
+                        fig.set_label(fig_label)
+
+                    ax[0].plot(soc_timeseries[0:t])
+
                 # update SOC for next time window
                 self.updated_initial_soc = soc_control_window[-1] / 100  # turn into ratio
 
@@ -281,7 +353,8 @@ class OptimizedDispatchStorageController(PyomoStorageControllerBaseClass):
                     storage_commodity_out[j] = storage_commodity_out_control_window[j - t]
                     soc[j] = soc_control_window[j - t]
 
-            return storage_commodity_out, soc
+            return storage_commodity_out[simulation_range], soc[simulation_range]
+            # return storage_commodity_out, soc
 
         return pyomo_dispatch_solver
 

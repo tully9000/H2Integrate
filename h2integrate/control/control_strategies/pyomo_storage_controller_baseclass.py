@@ -79,6 +79,8 @@ class PyomoStorageControllerBaseClass(om.ExplicitComponent):
         3600,
     )  # (min, max) time step lengths (in seconds) compatible with this model
 
+    _is_steppable = False
+
     def initialize(self):
         """
         Declare options for the component. See "Attributes" section in class doc strings for
@@ -117,6 +119,14 @@ class PyomoStorageControllerBaseClass(om.ExplicitComponent):
         # create inputs for all pyomo object creation functions from all connected technologies
         self.dispatch_connections = self.options["plant_config"]["tech_to_dispatch_connections"]
 
+        self.n_timesteps = int(self.options["plant_config"]["plant"]["simulation"]["n_timesteps"])
+
+        self.n_steps_per_compute = int(
+            self.options["plant_config"]["plant"]["simulation"].get(
+                "n_steps_per_compute", self.n_timesteps
+            )
+        )
+
         # create output for the pyomo control model
         self.add_discrete_output(
             "pyomo_dispatch_solver",
@@ -124,6 +134,20 @@ class PyomoStorageControllerBaseClass(om.ExplicitComponent):
             desc="callable: fully formed pyomo model and execution logic to be run \
                 by owning technologies performance model",
         )
+
+    def _get_compute_time_range(self, time_index):
+        """
+        This method gets the range of timestep indices that are simulated in a
+        single call to compute call.
+
+        Args:
+            time_index (numpy array): Starting time index of the simulation range.
+
+        Returns:
+            range: range of time indices
+        """
+        ti = int(time_index[0])
+        return range(ti, ti + self.n_steps_per_compute)
 
     def compute(self, inputs, outputs, discrete_inputs, discrete_outputs):
         """Build Pyomo model blocks and assign the dispatch solver."""

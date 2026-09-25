@@ -89,6 +89,8 @@ class PySAMBatteryPerformanceModel(StoragePerformanceBase):
         3600,
     )  # (min, max) time step lengths (in seconds) compatible with this model
 
+    _is_steppable = True
+
     def initialize(self):
         super().initialize()
         self.commodity = "electricity"
@@ -110,6 +112,8 @@ class PySAMBatteryPerformanceModel(StoragePerformanceBase):
         )
 
         super().setup()
+
+        self.PYSAM_model_has_been_setup = False
 
         # Initialize the PySAM BatteryStateful model with defaults
         self.system_model = BatteryStateful.default(self.config.chemistry)
@@ -134,42 +138,45 @@ class PySAMBatteryPerformanceModel(StoragePerformanceBase):
             outputs["capacity_factor"] = 0.0
             return
 
-        # Size the battery based on inputs.
-        module_specs = {
-            "capacity": self.config.ref_module_capacity,
-            "surface_area": self.config.ref_module_surface_area,
-        }
+        if (inputs["timestep_index"] == 0) and (not self.PYSAM_model_has_been_setup):
+            # PYSAM battery model has not yet been setup
 
-        BatteryTools.battery_model_sizing(
-            self.system_model,
-            inputs["max_charge_rate"][0],
-            inputs["storage_capacity"][0],
-            self.system_model.ParamsPack.nominal_voltage,
-            module_specs=module_specs,
-        )
-        self.system_model.ParamsPack.h = self.config.battery_h
-        self.system_model.ParamsPack.Cp = self.config.Cp
-        self.system_model.ParamsCell.resistance = self.config.resistance
-        self.system_model.ParamsCell.C_rate = (
-            inputs["max_charge_rate"][0] / inputs["storage_capacity"][0]
-        )
+            # Size the battery based on inputs.
+            module_specs = {
+                "capacity": self.config.ref_module_capacity,
+                "surface_area": self.config.ref_module_surface_area,
+            }
 
-        # Minimum set of parameters to set to get statefulBattery to work
-        self._set_control_mode()
+            BatteryTools.battery_model_sizing(
+                self.system_model,
+                inputs["max_charge_rate"][0],
+                inputs["storage_capacity"][0],
+                self.system_model.ParamsPack.nominal_voltage,
+                module_specs=module_specs,
+            )
+            self.system_model.ParamsPack.h = self.config.battery_h
+            self.system_model.ParamsPack.Cp = self.config.Cp
+            self.system_model.ParamsCell.resistance = self.config.resistance
+            self.system_model.ParamsCell.C_rate = (
+                inputs["max_charge_rate"][0] / inputs["storage_capacity"][0]
+            )
 
-        self.system_model.value("input_current", 0.0)
-        self.system_model.value("dt_hr", self.dt_hr)
-        self.system_model.value("minimum_SOC", self.config.min_soc_fraction * 100)
-        self.system_model.value("maximum_SOC", self.config.max_soc_fraction * 100)
-        self.system_model.value("initial_SOC", self.config.init_soc_fraction * 100)
+            # Minimum set of parameters to set to get statefulBattery to work
+            self._set_control_mode()
 
-        # Setup PySAM battery model using PySAM method
-        self.system_model.setup()
+            self.system_model.value("input_current", 0.0)
+            self.system_model.value("dt_hr", self.dt_hr)
+            self.system_model.value("minimum_SOC", self.config.min_soc_fraction * 100)
+            self.system_model.value("maximum_SOC", self.config.max_soc_fraction * 100)
+            self.system_model.value("initial_SOC", self.config.init_soc_fraction * 100)
 
-        # Run PySAM battery model 1 timestep to initialize values
-        self.system_model.value("dt_hr", self.dt_hr)
-        self.system_model.value("input_power", 0.0)
-        self.system_model.execute(0)
+            # Setup PySAM battery model using PySAM method
+            self.system_model.setup()
+
+            # Run PySAM battery model 1 timestep to initialize values
+            self.system_model.value("dt_hr", self.dt_hr)
+            self.system_model.value("input_power", 0.0)
+            self.system_model.execute(0)
 
         outputs = self.run_storage(
             inputs["max_charge_rate"][0],
@@ -189,6 +196,7 @@ class PySAMBatteryPerformanceModel(StoragePerformanceBase):
         commodity_available=list | np.ndarray,
         sim_start_index: int = 0,
         sim_end_index: int = 8760,
+        soc_init=None,
     ):
         """Run the PySAM BatteryStateful model over a control window.
 
@@ -225,6 +233,13 @@ class PySAMBatteryPerformanceModel(StoragePerformanceBase):
 
         # Loop through the provided input power/current (decided by control_variable)
         self.system_model.value("dt_hr", self.dt_hr)
+
+        # if soc_init is not None and self.n_steps_per_compute != 8760:
+        #     self.system_model.value("initial_SOC", soc_init * 100)
+        #     self.system_model.setup()
+        #     self.system_model.value("dt_hr", self.dt_hr)
+        #     self.system_model.value("input_power", 0.0)
+        #     self.system_model.execute(0)
 
         # initialize outputs
         n = len(storage_dispatch_commands)
@@ -287,6 +302,28 @@ class PySAMBatteryPerformanceModel(StoragePerformanceBase):
             # Save outputs at time t based on the simulation
             storage_power_out_timesteps[t] = self.system_model.value("P")
             soc_timesteps[t] = self.system_model.value("SOC")
+
+        if sim_start_index < 50 or False:
+            import matplotlib.pyplot as plt
+
+            fig_label = f"pysam_start{sim_start_index}"
+            open_fig_labels = plt.get_figlabels()
+            if fig_label in open_fig_labels:
+                fig = plt.figure(fig_label)
+                ax = fig.get_axes()
+            else:
+                fig, ax = plt.subplots(2, 2, sharex="all", layout="constrained")
+                ax = np.ravel(ax)
+                fig.suptitle(f"PySAM start index: {sim_start_index}")
+                fig.set_label(fig_label)
+
+            ax[0].plot(soc_timesteps)
+            ax[0].set_title("SOC")
+            ax[0].scatter(0, soc_init * 100)
+            ax[0].set_ylim([0, 100])
+
+            ax[1].plot(storage_power_out_timesteps)
+            ax[1].set_title("Power out")
 
         return storage_power_out_timesteps, soc_timesteps
 

@@ -382,7 +382,7 @@ def percent_diff(v1, v2, tol=1e-8):
     return pd * 100
 
 
-def percent_diff_dicts(d1, d2, tol=1e-8):
+def percent_diff_dicts(d1, d2, allow_dissimilar_keys=False, tol=1e-8):
     """
     Take two input dicts with matching keys and return a third dict with the
     percent difference for each value stored in matching keys.
@@ -392,28 +392,31 @@ def percent_diff_dicts(d1, d2, tol=1e-8):
     Args:
         d1 (dict): First dict to compare
         d2 (dict): Second dict to compare
+        allow_dissimilar_keys (bool): Ignore the error if dicts have dissimilar keys
 
     Returns:
         (dict): Dict of percent differences between d1 and d2
 
     """
-    if bool(
+    if (not allow_dissimilar_keys) and bool(
         set(d1) ^ set(d2)
     ):  # if this is True, there are elements that are not in both dictionaries
         raise ValueError("dictionaries do not have the same set of keys")
 
     d_out = {}
-    for k1, v1 in d1.items():
-        v2 = d2[k1]
+    # for k1, v1 in d1.items():
+    for k in set(d1) & set(d2):
+        v1 = d1[k]
+        v2 = d2[k]
 
-        if isinstance(v1["val"], dict | bool | str):
+        if callable(v1["val"]) or isinstance(v1["val"], dict | bool | str):
             # If the H2I input or output is more complicated than an array, skip it
             continue
 
         pd = percent_diff(v1["val"], v2["val"], tol=tol)
 
         # Use the norm of any percent difference arrays so output is always a scalar
-        d_out.update({k1: np.linalg.norm(pd)})
+        d_out.update({k: np.linalg.norm(pd)})
 
     return d_out
 
