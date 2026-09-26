@@ -34,13 +34,13 @@ tech_to_dispatch_connections:
 site_to_tech_connections:
   # connect the wind resource to the wind technology
   - [site.wind_resource, wind, wind_resource_data]
-# system_level_control:
-#   control_strategy: DemandFollowingControl
-#   demand_component: electrical_load_demand
-#   solver_options:
-#     solver_name: gauss_seidel
-#     max_iter: 20
-#     convergence_tolerance: 1.0e-6
+system_level_control:
+  control_strategy: DemandFollowingControl
+  demand_component: electrical_load_demand
+  solver_options:
+    solver_name: gauss_seidel
+    max_iter: 20
+    convergence_tolerance: 1.0e-6
 finance_parameters:
   finance_groups:
     profast_model:

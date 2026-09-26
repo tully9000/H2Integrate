@@ -295,7 +295,7 @@ class OptimizedDispatchStorageController(PyomoStorageControllerBaseClass):
                     soc_init=soc_init,
                 )
 
-                if t < 50 or False:
+                if (t > 100) and (t < 200) and True:
                     import matplotlib.pyplot as plt
 
                     fig_label = f"start{t}"
@@ -323,7 +323,7 @@ class OptimizedDispatchStorageController(PyomoStorageControllerBaseClass):
 
                     # ax[4].plot(self.storage_dispatch_commands)
 
-                if t == 96 or False:
+                if t == 96 and False:
                     import matplotlib.pyplot as plt
 
                     fig_label = f"soc{t}"

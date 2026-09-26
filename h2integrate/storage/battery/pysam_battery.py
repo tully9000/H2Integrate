@@ -114,6 +114,10 @@ class PySAMBatteryPerformanceModel(StoragePerformanceBase):
         super().setup()
 
         self.PYSAM_model_has_been_setup = False
+        self.state_storage = {
+            "next": {"index": -1, "state": {}},
+            "current": {"index": -1, "state": {}},
+        }
 
         # Initialize the PySAM BatteryStateful model with defaults
         self.system_model = BatteryStateful.default(self.config.chemistry)
@@ -234,12 +238,25 @@ class PySAMBatteryPerformanceModel(StoragePerformanceBase):
         # Loop through the provided input power/current (decided by control_variable)
         self.system_model.value("dt_hr", self.dt_hr)
 
-        # if soc_init is not None and self.n_steps_per_compute != 8760:
-        #     self.system_model.value("initial_SOC", soc_init * 100)
-        #     self.system_model.setup()
-        #     self.system_model.value("dt_hr", self.dt_hr)
-        #     self.system_model.value("input_power", 0.0)
-        #     self.system_model.execute(0)
+        if soc_init is not None and self.n_steps_per_compute != 8760:
+            # if soc_init is not None:
+            # self.system_model.value("initial_SOC", soc_init * 100)
+            # self.system_model.setup()
+            # self.system_model.value("dt_hr", self.dt_hr)
+            # self.system_model.value("input_power", 0.0)
+            # self.system_model.execute(0)
+            if sim_start_index == 0:
+                self.state_storage["current"]["state"] = self.system_model.export()
+                self.state_storage["current"]["index"] = sim_start_index
+
+            if self.state_storage["next"]["index"] == sim_start_index:
+                # self.system_model = BatteryStateful.new(self.state_storage["next"]["state"])
+                # self.system_model.setup()
+                self.system_model.replace(self.state_storage["next"]["state"])
+                self.state_storage["current"]["state"] = self.state_storage["next"]["state"]
+                self.state_storage["current"]["index"] = sim_start_index
+            else:
+                self.system_model.replace(self.state_storage["current"]["state"])
 
         # initialize outputs
         n = len(storage_dispatch_commands)
@@ -303,7 +320,9 @@ class PySAMBatteryPerformanceModel(StoragePerformanceBase):
             storage_power_out_timesteps[t] = self.system_model.value("P")
             soc_timesteps[t] = self.system_model.value("SOC")
 
-        if sim_start_index < 50 or False:
+        self.state_storage["next"] = {"index": sim_end_index, "state": self.system_model.export()}
+
+        if sim_start_index < 50 and False:
             import matplotlib.pyplot as plt
 
             fig_label = f"pysam_start{sim_start_index}"
