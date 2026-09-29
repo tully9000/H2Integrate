@@ -10,12 +10,15 @@ from h2integrate.core.dict_utils import percent_diff_dicts, find_nonzero_percent
 
 run_dict = {
     "pyomo": True,
+    # "slc_pyomo": True,
     "SLC": True,
 }
+
 
 pyomo_dispatch_config = (
     Path(__file__).parent / "pyomo_optimized_dispatch" / "pyomo_optimized_dispatch.yaml"
 )
+slc_pyomo_dispatch_config = Path(__file__).parent / "SLC_pyomo" / "pyomo_optimized_dispatch.yaml"
 slc_dispatch_config = (
     Path(__file__).parent / "SLC_optimized_dispatch" / "pyomo_optimized_dispatch.yaml"
 )
@@ -37,6 +40,23 @@ if run_dict.get("pyomo", False):
 
     battery_pyo = h2i_pyo.model.plant.battery.PySAMBatteryPerformanceModel.system_model
 
+if run_dict.get("slc_pyomo", False):
+    # Create an H2Integrate model
+    h2i_spy = H2IntegrateModel(slc_pyomo_dispatch_config)
+
+    demand_profile = np.ones(8760) * 100.0
+    # TODO: Update with demand module once it is developed
+    h2i_spy.setup()
+    h2i_spy.prob.set_val("battery.electricity_set_point", demand_profile, units="MW")
+    # Run the model
+    h2i_spy.run()
+    h2i_spy.post_process(print_results=False)
+
+    inputs_spy = dict(h2i_spy.model.list_inputs(out_stream=None))
+    outputs_spy = dict(h2i_spy.model.list_outputs(out_stream=None))
+
+    battery_spy = h2i_spy.model.plant.battery.PySAMBatteryPerformanceModel.system_model
+
 if run_dict.get("SLC", False):
     # Create an H2Integrate model
     h2i_slc = H2IntegrateModel(slc_dispatch_config)
@@ -52,36 +72,48 @@ if run_dict.get("SLC", False):
     inputs_SLC = dict(h2i_slc.model.list_inputs(out_stream=None))
     outputs_SLC = dict(h2i_slc.model.list_outputs(out_stream=None))
 
-    battery_slc = h2i_pyo.model.plant.battery.PySAMBatteryPerformanceModel.system_model
+    battery_slc = h2i_slc.model.plant.battery.PySAMBatteryPerformanceModel.system_model
 
-# Compare results
-if run_dict.get("pyomo", False) and run_dict.get("SLC", False):
-    inputs_pd_dict = percent_diff_dicts(inputs_pyomo, inputs_SLC, allow_dissimilar_keys=True)
-    outputs_pd_dict = percent_diff_dicts(outputs_pyomo, outputs_SLC, allow_dissimilar_keys=True)
-
-    in_abs, in_rel = find_nonzero_percent_diffs(inputs_pd_dict, dict(inputs_pyomo))
-    out_abs, out_rel = find_nonzero_percent_diffs(outputs_pd_dict, dict(outputs_pyomo))
-
-    pprint.pprint(in_abs)
-    pprint.pprint(out_abs)
+cases_ran = {k: run_dict.get(k, False) for k in ["pyomo", "slc_pyomo", "SLC"]}
+num_cases_ran = np.sum([v for k, v in cases_ran.items()])
 
 
-# Compare results
-if run_dict.get("pyomo", False) and run_dict.get("SLC", False):
-    fig, ax = plt.subplots(4, 1, sharex="all", layout="constrained")
+if num_cases_ran > 1:
+    # Compare results
+    if run_dict.get("pyomo", False) and run_dict.get("SLC", False):
+        inputs_pd_dict = percent_diff_dicts(inputs_pyomo, inputs_SLC, allow_dissimilar_keys=True)
+        outputs_pd_dict = percent_diff_dicts(outputs_pyomo, outputs_SLC, allow_dissimilar_keys=True)
 
-    def plot_output(ax, k):
-        ax.plot(outputs_pyomo[k]["val"])
-        ax.plot(outputs_SLC[k]["val"])
+        in_abs, in_rel = find_nonzero_percent_diffs(inputs_pd_dict, dict(inputs_pyomo))
+        out_abs, out_rel = find_nonzero_percent_diffs(outputs_pd_dict, dict(outputs_pyomo))
 
-    def plot_input(ax, k):
-        ax.plot(inputs_pyomo[k]["val"])
-        ax.plot(inputs_SLC[k]["val"])
+        pprint.pprint(in_abs)
+        pprint.pprint(out_abs)
 
-    plot_output(ax[0], "plant.battery.PySAMBatteryPerformanceModel.SOC")
-    plot_output(ax[1], "plant.battery.PySAMBatteryPerformanceModel.electricity_out")
-    # plot_input(ax[2], "plant.battery.PySAMBatteryPerformanceModel.electricity_set_point")
-    plot_input(ax[2], "plant.battery.PySAMBatteryPerformanceModel.electricity_in")
+    # Compare results
+    if (
+        run_dict.get("pyomo", False)
+        and run_dict.get("slc_pyomo", False)
+        and run_dict.get("SLC", False)
+    ):
+        fig, ax = plt.subplots(4, 1, sharex="all", layout="constrained")
+
+        def plot_output(ax, k):
+            ax.plot(outputs_pyomo[k]["val"])
+            ax.plot(outputs_spy[k]["val"])
+            ax.plot(outputs_SLC[k]["val"])
+
+        def plot_input(ax, k):
+            ax.plot(inputs_pyomo[k]["val"])
+            ax.plot(inputs_spy[k]["val"])
+            ax.plot(inputs_SLC[k]["val"])
+
+        plot_output(ax[0], "plant.battery.PySAMBatteryPerformanceModel.SOC")
+        plot_output(ax[1], "plant.battery.PySAMBatteryPerformanceModel.electricity_out")
+        # plot_input(ax[2], "plant.battery.PySAMBatteryPerformanceModel.electricity_set_point")
+        plot_input(ax[2], "plant.battery.PySAMBatteryPerformanceModel.electricity_in")
+
+        # []
 
 
 # inputs = dict(model.model.list_inputs(out_stream=None))
@@ -131,59 +163,3 @@ if run_dict.get("pyomo", False) and run_dict.get("SLC", False):
 #     where="post",
 #     color="black",
 # )
-
-
-# # Plot the results
-# fig, ax = plt.subplots(2, 1, sharex=True, figsize=(8, 6))
-
-# start_hour = 0
-# end_hour = 200
-
-# ax[0].plot(
-#     range(start_hour, end_hour),
-#     model.prob.get_val("battery.SOC", units="percent")[start_hour:end_hour],
-#     label="SOC",
-# )
-# ax[0].set_ylabel("SOC (%)")
-# ax[0].set_ylim([0, 110])
-# ax[0].axhline(y=90.0, linestyle=":", color="k", alpha=0.5, label="Max Charge")
-# ax[0].legend()
-
-# ax[1].plot(
-#     range(start_hour, end_hour),
-#     model.prob.get_val("battery.electricity_in", units="MW")[start_hour:end_hour],
-#     linestyle="-",
-#     label="Electricity In (MW)",
-# )
-
-# ax[1].plot(
-#     range(start_hour, end_hour),
-#     model.prob.get_val("battery.unmet_electricity_demand_out", units="MW")[start_hour:end_hour],
-#     linestyle=":",
-#     label="Unmet Electrical Demand (MW)",
-# )
-# ax[1].plot(
-#     range(start_hour, end_hour),
-#     model.prob.get_val("battery.electricity_out", units="MW")[start_hour:end_hour],
-#     linestyle="-",
-#     label="Electricity Out (MW)",
-# )
-# ax[1].plot(
-#     range(start_hour, end_hour),
-#     model.prob.get_val("battery.battery_electricity", units="MW")[start_hour:end_hour],
-#     linestyle="-.",
-#     label="Battery Electricity Out (MW)",
-# )
-# ax[1].plot(
-#     range(start_hour, end_hour),
-#     demand_profile[start_hour:end_hour],
-#     linestyle="--",
-#     label="Electrical Demand (MW)",
-# )
-# ax[1].set_ylim([-1e2, 2.5e2])
-# ax[1].set_ylabel("Electricity Hourly (MW)")
-# ax[1].set_xlabel("Timestep (hr)")
-
-# plt.legend(ncol=2, frameon=False)
-# plt.tight_layout()
-# plt.savefig("optimized_dispatch_plot.png", dpi=300)

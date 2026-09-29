@@ -205,6 +205,7 @@ supported_models = _ModelRegistry(
         "GasStreamCombinerPerformanceModel": "transporters:GasStreamCombinerPerformanceModel",
         # System-level control strategies
         "DemandFollowingControl": "control.control_strategies.system_level.demand_following_control:DemandFollowingControl",
+        "DemandFollowingControlPyomo": "control.control_strategies.system_level.demand_following_control_pyomo_storage:DemandFollowingControlPyomo",
         "CostMinimizationControl": "control.control_strategies.system_level.cost_minimization_control:CostMinimizationControl",
         "ProfitMaximizationControl": "control.control_strategies.system_level.profit_maximization_control:ProfitMaximizationControl",
     }

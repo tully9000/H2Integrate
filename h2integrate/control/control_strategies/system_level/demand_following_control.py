@@ -93,6 +93,49 @@ class DemandFollowingControl(SystemLevelControlBase):
                     remaining_demand[simulation_range] / n_dispatchable
                 )
 
+        if inputs["timestep_index"] < 50 and False:
+            import matplotlib.pyplot as plt
+
+            sim_start_index = int(inputs["timestep_index"][0])
+
+            fig_label = f"SLC_start{sim_start_index}"
+
+            preexisting_fig = False
+
+            open_fig_labels = plt.get_figlabels()
+            if fig_label in open_fig_labels:
+                fig = plt.figure(fig_label)
+                ax = fig.get_axes()
+
+                preexisting_fig = True
+            else:
+                fig, ax = plt.subplots(2, 2, sharex="all", layout="constrained")
+                ax = np.ravel(ax)
+                fig.suptitle(f"SLC start index: {sim_start_index}")
+                fig.set_label(fig_label)
+
+            kw = {}
+            kw["color"] = "blue"
+            kw["linewidth"] = 3
+
+            if preexisting_fig and self.n_steps_per_compute != 8760:
+                for axs in ax:
+                    for ln in axs.lines:
+                        if ln.get_color() == "blue":
+                            ln.set_alpha(0.25)
+
+            # ax[0].plot(inputs['SOC'][simulation_range], **kw)
+            ax[0].plot(inputs["SOC"][: simulation_range.stop], **kw)
+            ax[0].scatter(0, inputs["SOC"][simulation_range.start - 1], color=kw["color"])
+            # ax[0].plot(inputs["wind_electricity_out"][simulation_range], **kw)
+            ax[1].plot(inputs["battery_electricity_out"][: simulation_range.stop], **kw)
+
+            # ax[2].plot(outputs["wind_electricity_set_point"][simulation_range], **kw)
+            ax[3].plot(outputs["battery_electricity_set_point"][: simulation_range.stop], **kw)
+
+            # []
+
+        # []
         # if (int(inputs["timestep_index"][0]) < 250) and (int(inputs["timestep_index"][0]) > 0):
         #     current_SOC = inputs["SOC"][int(inputs["timestep_index"][0])]
 

@@ -238,28 +238,26 @@ class PySAMBatteryPerformanceModel(StoragePerformanceBase):
         # Loop through the provided input power/current (decided by control_variable)
         self.system_model.value("dt_hr", self.dt_hr)
 
-        if soc_init is not None and self.n_steps_per_compute != 8760:
-            # if soc_init is not None:
-            # self.system_model.value("initial_SOC", soc_init * 100)
-            # self.system_model.setup()
-            # self.system_model.value("dt_hr", self.dt_hr)
-            # self.system_model.value("input_power", 0.0)
-            # self.system_model.execute(0)
+        # if soc_init is not None and self.n_steps_per_compute != 8760:
+        if self.n_steps_per_compute != 8760:
             if sim_start_index == 0:
                 self.state_storage["current"]["state"] = self.system_model.export()
                 self.state_storage["current"]["index"] = sim_start_index
-
-            if self.state_storage["next"]["index"] == sim_start_index:
-                # self.system_model = BatteryStateful.new(self.state_storage["next"]["state"])
-                # self.system_model.setup()
-                self.system_model.replace(self.state_storage["next"]["state"])
-                self.state_storage["current"]["state"] = self.state_storage["next"]["state"]
-                self.state_storage["current"]["index"] = sim_start_index
             else:
-                self.system_model.replace(self.state_storage["current"]["state"])
+                if sim_start_index == self.state_storage["next"]["index"]:
+                    self.system_model.replace(self.state_storage["next"]["state"])
+                    self.state_storage["current"]["state"] = self.state_storage["next"]["state"]
+                    self.state_storage["current"]["index"] = sim_start_index
+                elif sim_start_index == self.state_storage["current"]["index"]:
+                    self.system_model.replace(self.state_storage["current"]["state"])
+
+                # else:
+
+        soc_init = self.system_model.StateCell.SOC_prev
 
         # initialize outputs
-        n = len(storage_dispatch_commands)
+        # n = len(storage_dispatch_commands)
+        n = sim_end_index - sim_start_index
         storage_power_out_timesteps = np.zeros(n)
         soc_timesteps = np.zeros(n)
 
@@ -267,7 +265,13 @@ class PySAMBatteryPerformanceModel(StoragePerformanceBase):
         soc_max = self.system_model.value("maximum_SOC") / 100.0
         soc_min = self.system_model.value("minimum_SOC") / 100.0
 
-        commands = np.asarray(storage_dispatch_commands, dtype=float)
+        # commands = np.asarray(storage_dispatch_commands, dtype=float)
+        if len(storage_dispatch_commands) > n:
+            commands = np.asarray(storage_dispatch_commands, dtype=float)[
+                sim_start_index:sim_end_index
+            ]
+        else:
+            commands = np.asarray(storage_dispatch_commands, dtype=float)
 
         for t, cmd in enumerate(commands):
             # get storage SOC at time t as a fraction
@@ -322,27 +326,59 @@ class PySAMBatteryPerformanceModel(StoragePerformanceBase):
 
         self.state_storage["next"] = {"index": sim_end_index, "state": self.system_model.export()}
 
-        if sim_start_index < 50 and False:
+        if sim_start_index == 24 and False:
             import matplotlib.pyplot as plt
 
             fig_label = f"pysam_start{sim_start_index}"
+
+            preexisting_fig = False
+
             open_fig_labels = plt.get_figlabels()
             if fig_label in open_fig_labels:
                 fig = plt.figure(fig_label)
                 ax = fig.get_axes()
+
+                preexisting_fig = True
             else:
                 fig, ax = plt.subplots(2, 2, sharex="all", layout="constrained")
                 ax = np.ravel(ax)
                 fig.suptitle(f"PySAM start index: {sim_start_index}")
                 fig.set_label(fig_label)
 
-            ax[0].plot(soc_timesteps)
+            slc = self.options["plant_config"]["system_level_control"]["control_strategy"]
+
+            kw = {}
+
+            # if self.n_steps_per_compute == 8760:
+            if not slc.endswith("Pyomo"):
+                kw["color"] = "blue"
+                kw["linewidth"] = 3
+            else:
+                kw["color"] = "orange"
+
+            if preexisting_fig and self.n_steps_per_compute != 8760:
+                for axs in ax:
+                    for ln in axs.lines:
+                        if ln.get_color() == "blue":
+                            continue
+                        else:
+                            ln.set_alpha(0.25)
+
+            ax[0].plot(soc_timesteps, **kw)
             ax[0].set_title("SOC")
-            ax[0].scatter(0, soc_init * 100)
+            ax[0].scatter(0, soc_init, color=kw["color"])
             ax[0].set_ylim([0, 100])
 
-            ax[1].plot(storage_power_out_timesteps)
+            ax[1].plot(storage_power_out_timesteps, **kw)
             ax[1].set_title("Power out")
+
+            ax[2].plot(storage_dispatch_commands[sim_start_index:sim_end_index], **kw)
+            ax[2].set_title("Dispatch commands")
+
+            ax[3].plot(commodity_available[sim_start_index:sim_end_index], **kw)
+            ax[3].set_title("Commodity available")
+
+            # []
 
         return storage_power_out_timesteps, soc_timesteps
 

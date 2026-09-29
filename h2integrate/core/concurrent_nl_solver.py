@@ -72,6 +72,14 @@ class ConcurrentPlantNLBGSSolver(NonlinearBlockGS):
     def __init__(self, plant_config):
         super().__init__()
         self.plant_config = plant_config
+        self.options["iprint"] = 0
+        # self.options["maxiter"] = 50
+        # self.options["iprint"] = 0
+
+        # import openmdao.api as om
+        # recorder = om.SqliteRecorder("solver_recording.sql")
+        # self.add_recorder(recorder)
+        # self.recording_options["record_abs_error"] = True
 
     def solve(self):
         # Should only be used when system is the plant group
@@ -102,6 +110,9 @@ class ConcurrentPlantNLBGSSolver(NonlinearBlockGS):
 
         with Recording("NLRunOnce", 0, self):
             for ss in sim_starts:
+                # if (ss > 200) and (ss < 8730):
+                #     continue
+
                 # Update timestep_index in all subsystems
                 for tk in timestep_keys:
                     system._inputs[tk] = ss
@@ -117,6 +128,63 @@ class ConcurrentPlantNLBGSSolver(NonlinearBlockGS):
 
                 try:
                     self._solve()
+
+                    if self._iter_count > 30 and False:
+                        import openmdao.api as om
+
+                        cr = om.CaseReader(
+                            "/Users/ztully/Documents/software/H2Integrate/examples/37_concurrent_simulation/model_predictive_control/run_pyomo_optimized_dispatch_out/solver_recording.sql"
+                        )
+
+                        input_vals = {}
+
+                        case0 = cr.get_case(cr.list_cases()[0])
+                        input_vals = {k: [] for k in case0.inputs.keys()}
+                        output_vals = {k: [] for k in case0.outputs.keys()}
+
+                        window_start_idx = 0
+
+                        for i, cn in enumerate(cr.list_cases()):
+                            if cn.endswith("|1"):
+                                window_start_idx = i
+
+                        for i, case_name in enumerate(cr.list_cases()):
+                            if i < window_start_idx:
+                                continue
+                            case_i = cr.get_case(case_name)
+                            for k in input_vals.keys():
+                                input_vals[k].append(case_i.inputs[k])
+                            for k in output_vals.keys():
+                                output_vals[k].append(case_i.outputs[k])
+
+                        import matplotlib.pyplot as plt
+
+                        for _i, k in enumerate(input_vals.keys()):
+                            fig, ax = plt.subplots(1, 1, layout="constrained")
+                            ax.set_title(k)
+
+                            inp = np.stack(input_vals[k])
+
+                            ax.plot(inp)
+                            if np.allclose(inp[0, :], inp[-1, :]):
+                                plt.close(fig)
+
+                        # []
+
+                        for _i, k in enumerate(output_vals.keys()):
+                            fig, ax = plt.subplots(1, 1, layout="constrained")
+                            ax.set_title(k)
+
+                            outp = np.stack(output_vals[k])
+
+                            ax.plot(outp)
+                            if np.allclose(outp[0, :], outp[-1, :]):
+                                plt.close(fig)
+
+                            # []
+
+                        pass
+
                 except Exception as err:
                     if self.options["debug_print"]:
                         self._print_exc_debug_info()

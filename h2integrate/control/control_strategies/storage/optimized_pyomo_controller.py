@@ -295,7 +295,45 @@ class OptimizedDispatchStorageController(PyomoStorageControllerBaseClass):
                     soc_init=soc_init,
                 )
 
-                if (t > 100) and (t < 200) and True:
+                if inputs["timestep_index"] < 50 and False:
+                    import matplotlib.pyplot as plt
+
+                    sim_start_index = int(inputs["timestep_index"][0])
+
+                    fig_label = f"dispatch_storage{sim_start_index}"
+
+                    preexisting_fig = False
+
+                    open_fig_labels = plt.get_figlabels()
+                    if fig_label in open_fig_labels:
+                        fig = plt.figure(fig_label)
+                        ax = fig.get_axes()
+
+                        preexisting_fig = True
+                    else:
+                        fig, ax = plt.subplots(2, 2, sharex="all", layout="constrained")
+                        ax = np.ravel(ax)
+                        fig.suptitle(f"Dispatch storage start index: {sim_start_index}")
+                        fig.set_label(fig_label)
+
+                    kw = {}
+                    kw["color"] = "blue"
+                    kw["linewidth"] = 3
+
+                    if preexisting_fig and self.n_steps_per_compute != 8760:
+                        for axs in ax:
+                            for ln in axs.lines:
+                                if ln.get_color() == "blue":
+                                    ln.set_alpha(0.25)
+
+                    ax[0].plot(commodity_in, **kw)
+                    ax[0].set_title("Commodity in")
+                    ax[1].plot(demand_in, **kw)
+                    ax[1].set_title("Demand in")
+                    ax[2].scatter(0, soc_init, color=kw["color"])
+                    ax[2].set_title("SOC init")
+
+                if (t > 100) and (t < 200) and False:
                     import matplotlib.pyplot as plt
 
                     fig_label = f"start{t}"

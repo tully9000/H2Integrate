@@ -32,8 +32,8 @@ technologies:
         commodity: electricity
         commodity_rate_units: kW
   battery:
-    # control_strategy:
-      # model: OptimizedDispatchStorageController
+    control_strategy:
+      model: OptimizedDispatchStorageController
     performance_model:
       model: PySAMBatteryPerformanceModel
     cost_model:
