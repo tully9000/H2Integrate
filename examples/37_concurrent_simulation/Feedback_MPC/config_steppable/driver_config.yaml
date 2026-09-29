@@ -1,0 +1,12 @@
+name: driver_config
+description: This analysis runs a natural gas power plant with hybrid wind and solar to meet a fixed electrical load demand.
+  The natural gas plant is used to meet any remaining load after the renewable generation is subtracted from the demand, and
+  the natural gas plant and renewables are combined at the end to meet the demand. The financial performance of the natural
+  gas plant and renewables are evaluated separately using ProFastLCO, and then combined for an overall LCOE and NPV.
+general:
+  folder_output: mppoc_playground/SLC_battery_SOC/outputs
+recorder:
+  flag: true
+  file: cases.sql
+  overwrite_recorder: true
+  recorder_attachment: driver

@@ -223,16 +223,7 @@ class DemandFollowingControlPyomo(DemandFollowingControl, OptimizedDispatchStora
         for t in window_start_indices:
             # get the inputs over the current control window
             commodity_in = inputs["wind_electricity_out"][t : t + self.n_control_window_hours]
-            # commodity_in = inputs[f"{self.config.commodity}_in"][
-            #     t : t + self.n_control_window_hours
-            # ]
             demand_in = inputs[f"{commodity}_demand"][t : t + self.n_control_window_hours]
-            # demand_in = remaining_demand[
-            #     t : t + self.n_control_window_hours
-            # ]
-            # demand_in = inputs[f"{commodity_name}_set_point"][
-            #     t : t + self.n_control_window_hours
-            # ]
 
             # Progress report
             if t % (self.n_timesteps // 4) < self.n_control_window_hours:

@@ -61,6 +61,8 @@ class SimpleStorageOpenLoopController(OpenLoopControlBase):
         3600,
     )  # (min, max) time step lengths (in seconds) compatible with this model
 
+    _is_steppable = True
+
     def setup(self):
         self.config = SimpleStorageOpenLoopControllerConfig.from_dict(
             merge_shared_inputs(self.options["tech_config"]["model_inputs"], "control"),

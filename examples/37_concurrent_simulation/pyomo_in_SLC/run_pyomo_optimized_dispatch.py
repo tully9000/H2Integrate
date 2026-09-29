@@ -11,7 +11,7 @@ from h2integrate.core.dict_utils import percent_diff_dicts, find_nonzero_percent
 run_dict = {
     "pyomo": True,
     # "slc_pyomo": True,
-    "SLC": True,
+    # "SLC": True,
 }
 
 

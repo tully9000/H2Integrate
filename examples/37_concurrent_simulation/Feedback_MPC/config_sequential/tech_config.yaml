@@ -1,0 +1,156 @@
+name: technology_config
+description: This plant produces electricity with wind, solar, natural gas and battery to meet a fixed electrical load demand,
+  coordinated by the system-level controller (SLC).
+technologies:
+  wind:
+    performance_model:
+      model: PYSAMWindPlantPerformanceModel
+    cost_model:
+      model: ATBWindPlantCostModel
+    model_inputs:
+      performance_parameters:
+        num_turbines: 294
+        turbine_rating_kw: 6000
+        hub_height: 115
+        rotor_diameter: 170
+        create_model_from: default
+        config_name: WindPowerSingleOwner
+        pysam_options:
+          Farm:
+            wind_farm_wake_model: 0
+          Losses:
+            ops_strategies_loss: 0.0
+        layout:
+          layout_mode: basicgrid
+          layout_options:
+            row_D_spacing: 7.0
+            turbine_D_spacing: 7.0
+            rotation_angle_deg: 0.0
+            row_phase_offset: 0.0
+            layout_shape: square
+      cost_parameters:
+        # 2024 NLR ATB, Land-Based Wind, Class 2, Technology 1, moderate, 2026 numbers
+        capex_per_kW: 1537.00
+        opex_per_kW_per_year: 31.00
+        cost_year: 2022
+  solar:
+    performance_model:
+      model: PYSAMSolarPlantPerformanceModel
+    cost_model:
+      model: ATBUtilityPVCostModel
+    model_inputs:
+      performance_parameters:
+        pv_capacity_kWdc: 1944370.15213615
+        dc_ac_ratio: 1.34
+        create_model_from: new
+        # tilt_angle_func: lat-func
+        pysam_options:
+          SystemDesign:
+            gcr: 0.3
+            array_type: 2
+            bifaciality: 0.65
+            inv_eff: 96.0
+            losses: 14.6
+            module_type: 1
+            azimuth: 180
+            rotlim: 45
+          SolarResource:
+            albedo_default: 0.2
+      cost_parameters:
+        # 2024 NLR ATB, Solar - Utility PV, Resource Class 2, moderate, 2026 numbers
+        capex_per_kWac: 1432.00
+        opex_per_kWac_per_year: 20.00
+        cost_year: 2022
+  battery:
+    performance_model:
+      model: StoragePerformanceModel
+    cost_model:
+      model: ATBBatteryCostModel
+    # Under SLC, the battery-level controller is a thin passthrough; SLC
+    # decides discharge/charge set-points at the system level. Using
+    # SimpleStorageOpenLoopController (mirrors examples/35 battery_with_controller).
+    control_strategy:
+      model: SimpleStorageOpenLoopController
+    model_inputs:
+      shared_parameters:
+        commodity: electricity
+        commodity_rate_units: kW
+        max_charge_rate: 1000000.0  # kW, 1000 MW
+        max_capacity: 9679084.421410603  # kWh, ~9.7 GWh
+        demand_profile: 1000000.0  # kW; unused by SimpleStorageOpenLoopController when
+                                    # set_demand_as_avg_commodity_in=false + SLC drives set_point
+      performance_parameters:
+        max_soc_fraction: 0.9
+        min_soc_fraction: 0.1
+        init_soc_fraction: 0.7
+        round_trip_efficiency: 0.9
+      control_parameters:
+        set_demand_as_avg_commodity_in: false
+      cost_parameters:
+        # 2024 NLR ATB, Utility-Scale Battery Storage, moderate, 2026 numbers
+        cost_year: 2022
+        energy_capex: 297.00
+        power_capex: 312.00
+        opex_fraction: 0.025
+  ng_feedstock:
+    performance_model:
+      model: FeedstockPerformanceModel
+    cost_model:
+      model: FeedstockCostModel
+    model_inputs:
+      shared_parameters:
+        commodity: natural_gas
+        commodity_rate_units: MMBtu/h
+      performance_parameters:
+        rated_capacity: 7500.  # MMBtu
+      cost_parameters:
+        cost_year: 2026
+        price: 6.09  # USD/MMBtu; EIA Texas Industrial NG, Feb. 26
+        annual_cost: 0.
+        start_up_cost: 0.
+  natural_gas_plant:
+    performance_model:
+      model: NaturalGasPerformanceModel
+    cost_model:
+      model: NaturalGasCostModel
+    model_inputs:
+      performance_parameters:
+        heat_rate_mmbtu_per_mwh: 6.3  # MMBtu/MWh - 2-on-1 F-frame NGCC, no CCS
+        system_capacity_mw: 500.
+      cost_parameters:
+        capex_per_kw: 2500.00  # $/kW - 2026 cited NGCC costs
+        cost_year: 2026
+        fixed_opex_per_kw_per_year: 33.10
+        variable_opex_per_mwh: 2.10
+  electrical_load_demand:
+    performance_model:
+      model: GenericDemandComponent
+    model_inputs:
+      performance_parameters:
+        commodity: electricity
+        commodity_rate_units: kW
+        demand_profile: 1000000  # 1 GW
+  renew_combiner:
+    performance_model:
+      model: GenericCombinerPerformanceModel
+    model_inputs:
+      performance_parameters:
+        commodity: electricity
+        commodity_rate_units: kW
+        in_streams: 2  # solar, wind
+  supply_combiner:
+    performance_model:
+      model: GenericCombinerPerformanceModel
+    model_inputs:
+      performance_parameters:
+        commodity: electricity
+        commodity_rate_units: kW
+        in_streams: 2  # renew_combiner (solar+wind), natural_gas_plant
+  combiner:
+    performance_model:
+      model: GenericCombinerPerformanceModel
+    model_inputs:
+      performance_parameters:
+        commodity: electricity
+        commodity_rate_units: kW
+        in_streams: 2  # supply_combiner (renewables+gas), battery
