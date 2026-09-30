@@ -92,10 +92,12 @@ class UCControl(SystemLevelControlBase):
 
         # UC schedule cache (keyed on demand + available-renewables arrays).
         self._cache_key = None
-        self._gas_schedule = None
-        self._batt_schedule = None
-        self._solar_schedule = None
-        self._wind_schedule = None
+        self._gas_schedule = np.zeros(self.n_timesteps)
+        self._batt_schedule = np.zeros(self.n_timesteps)
+        self._solar_schedule = np.zeros(self.n_timesteps)
+        self._wind_schedule = np.zeros(self.n_timesteps)
+
+        self.soc_store = np.zeros(self.n_timesteps)
 
         # Cumulative wall-clock time spent in the rolling-horizon UC MILP
         # solves (s), exposed as an OpenMDAO output so it is captured by the
@@ -108,6 +110,11 @@ class UCControl(SystemLevelControlBase):
             units="s",
             desc="Cumulative wall-clock time spent in UC MILP solves",
         )
+
+        self.add_input("battery_SOC", shape=self.n_timesteps, units="unitless")
+
+        for f in self.flexible_techs:
+            self.add_input(f"{f}_uncurtailed_electricity_out", shape=self.n_timesteps, units="kW")
 
         # Renewable-availability freeze state. The flexible-tech ``_out`` input
         # equals true availability only when the tech was commanded at its
@@ -124,6 +131,15 @@ class UCControl(SystemLevelControlBase):
         # If it changes (renewable sizing as a design variable), the frozen
         # availability is stale and must be re-measured.
         self._rated_key = None
+
+        self._avail_frozen_dict = {}
+        self._prev_rated_dict = {}
+
+        n_windows = int(self.n_timesteps / self.n_steps_per_compute)
+        for i in range(n_windows):
+            sim_range = self._get_compute_time_range([i * self.n_steps_per_compute])
+            self._avail_frozen_dict.update({sim_range: False})
+            self._prev_rated_dict.update({sim_range: False})
 
     # ------------------------------------------------------------------
     # MILP parameter construction
@@ -198,7 +214,7 @@ class UCControl(SystemLevelControlBase):
     # Receding-horizon UC solve
     # ------------------------------------------------------------------
 
-    def _solve_rolling_uc(self, load, avail_solar, avail_wind):
+    def _solve_rolling_uc(self, load, avail_solar, avail_wind, measured_SOC, simulation_range):
         """Solve the UC MILP in a receding horizon across the full year.
 
         At each step a ``horizon``-hour lookahead MILP is solved starting from
@@ -226,12 +242,16 @@ class UCControl(SystemLevelControlBase):
         n = self.n_timesteps
         horizon = self._horizon
         step = self._control_step
-        gas = np.zeros(n)
-        batt = np.zeros(n)
-        solar = np.zeros(n)
-        wind = np.zeros(n)
+        gas = self._gas_schedule
+        batt = self._batt_schedule
+        solar = self._solar_schedule
+        wind = self._wind_schedule
 
-        soc_carry = self._soc_init
+        if simulation_range.start == 0:
+            soc_carry = self._soc_init
+        else:
+            soc_carry = self.soc_store[simulation_range.start - 1]
+
         commit_carry = [0]  # gas starts off
         p_max = self._gas_unit_params["P_max"]
 
@@ -249,8 +269,14 @@ class UCControl(SystemLevelControlBase):
         t_start = time.monotonic()
         next_report = time.monotonic()
 
-        t = 0
-        while t < n_solve:
+        t = simulation_range.start
+        while t < simulation_range.stop:
+            # if t > 200:
+            #     end = min(t + horizon, n)
+            #     impl = min(step, end - t)
+            #     t += impl
+            #     continue
+
             # Lookahead window [t, end); shrinks naturally near the year's end.
             end = min(t + horizon, n)
             load_w = np.asarray(load[t:end], dtype=float)
@@ -280,8 +306,13 @@ class UCControl(SystemLevelControlBase):
                 batt[t : t + impl] = b[:impl]
                 solar[t : t + impl] = res["p_solar"][:impl]
                 wind[t : t + impl] = res["p_wind"][:impl]
+
                 soc_carry = float(res["soc"][impl - 1])
+                # soc_carry = measured_SOC[impl-1] * self._battery_template["E_capacity"]
+
                 commit_carry = [int(round(res["u"][0, impl - 1]))]
+                self.soc_store[t : t + impl] = res["soc"][:impl]
+
             else:
                 # Fallback: gas covers the positive residual, battery idle,
                 # renewables run uncurtailed (use all available).
@@ -323,19 +354,27 @@ class UCControl(SystemLevelControlBase):
 
         self._total_solve_wall_s += time.monotonic() - t_start
 
-        return gas, batt, solar, wind
+        return (
+            gas[simulation_range],
+            batt[simulation_range],
+            solar[simulation_range],
+            wind[simulation_range],
+        )
 
     # ------------------------------------------------------------------
     # OpenMDAO compute
     # ------------------------------------------------------------------
 
     def compute(self, inputs, outputs):
+        simulation_range = self._get_compute_time_range(inputs["timestep_index"])
+
         commodity = self.commodity
         demand = inputs[self.demand_input_name].copy()
 
-        # Rebuild MILP parameters from config/inputs before anything reads them
-        # (_warmup_dispatch and _solve_rolling_uc both need _gas_unit_params).
-        self._build_params(inputs)
+        if simulation_range.start == 0:
+            # Rebuild MILP parameters from config/inputs before anything reads them
+            # (_warmup_dispatch and _solve_rolling_uc both need _gas_unit_params).
+            self._build_params(inputs)
 
         # ── Step 1: fixed techs always produce; net them out of demand ────
         load = demand.copy()
@@ -354,7 +393,8 @@ class UCControl(SystemLevelControlBase):
         # ``_out``. This is only the true availability when the tech was
         # commanded at its rated set-point on the previous iteration; see the
         # freeze logic below.
-        avail_read = {f: inputs[f"{f}_{commodity}_out"].copy() for f in flex_techs}
+        avail_read = {f: inputs[f"{f}_uncurtailed_{commodity}_out"].copy() for f in flex_techs}
+        # avail_read = {f: inputs[f"{f}_{commodity}_out"].copy() for f in flex_techs}
 
         # ── Invalidate frozen availability if rated capacity changed ──────
         # Availability is a *measured* quantity (the perf model's output under
@@ -374,7 +414,8 @@ class UCControl(SystemLevelControlBase):
             self._rated_key = rated_key
 
         # ── Establish frozen renewable availability ───────────────────────
-        if not self._avail_frozen:
+        # if not self._avail_frozen:
+        if not self._avail_frozen_dict[simulation_range]:
             # Command every flexible tech at rated so next iteration's ``_out``
             # reports true availability.
             for f in flex_techs:
@@ -391,14 +432,20 @@ class UCControl(SystemLevelControlBase):
                             f"{flexible_tech}_rated_{tech_commodity}_production"
                         ] * np.ones(self.n_timesteps)
 
-            if self._prev_rated:
+            if self._prev_rated_dict[simulation_range]:
                 # ``avail_read`` now reflects a full rated command → trust and
                 # freeze it.
-                self._avail_by_tech = avail_read
-                self._avail_frozen = True
-            self._prev_rated = True
+                if not self._avail_by_tech:
+                    self._avail_by_tech = avail_read
+                else:
+                    for k in self._avail_by_tech.keys():
+                        # self._avail_by_tech[k][simulation_range] = avail_read[k][simulation_range]
+                        self._avail_by_tech[k] = avail_read[k]
+                self._avail_frozen_dict[simulation_range] = True
 
-            if not self._avail_frozen:
+            self._prev_rated_dict[simulation_range] = True
+
+            if not self._avail_frozen_dict[simulation_range]:
                 # Warm-up: availability not yet trusted. Command a safe residual
                 # gas dispatch and idle battery so the solver has a consistent
                 # state; renewables already commanded at rated above.
@@ -430,14 +477,17 @@ class UCControl(SystemLevelControlBase):
             repr(sorted(self._gas_unit_params.items())),
             repr(sorted(self._battery_template.items())),
             self._soc_init,
+            simulation_range.start,
         )
         if key != self._cache_key:
             (
-                self._gas_schedule,
-                self._batt_schedule,
-                self._solar_schedule,
-                self._wind_schedule,
-            ) = self._solve_rolling_uc(load, avail_solar, avail_wind)
+                self._gas_schedule[simulation_range],
+                self._batt_schedule[simulation_range],
+                self._solar_schedule[simulation_range],
+                self._wind_schedule[simulation_range],
+            ) = self._solve_rolling_uc(
+                load, avail_solar, avail_wind, inputs["battery_SOC"], simulation_range
+            )
             self._cache_key = key
         else:
             logger.debug("UC schedule cache hit; reusing previous solve")
@@ -451,7 +501,9 @@ class UCControl(SystemLevelControlBase):
             sched = self._wind_schedule if is_wind[f] else self._solar_schedule
             with np.errstate(divide="ignore", invalid="ignore"):
                 share = np.where(total > 0, avail_by_tech[f] / total, 0.0)
-            outputs[f"{f}_{commodity}_set_point"] = share * sched
+            outputs[f"{f}_{commodity}_set_point"][simulation_range] = (
+                share[simulation_range] * sched[simulation_range]
+            )
 
         # ── Step 3: dispatchable techs (gas) get the UC schedule ──────────
         dispatchables = [
@@ -459,8 +511,8 @@ class UCControl(SystemLevelControlBase):
         ]
         n_dispatchable = max(len(dispatchables), 1)
         for dispatchable_tech in dispatchables:
-            outputs[f"{dispatchable_tech}_{commodity}_set_point"] = (
-                self._gas_schedule / n_dispatchable
+            outputs[f"{dispatchable_tech}_{commodity}_set_point"][simulation_range] = (
+                self._gas_schedule[simulation_range] / n_dispatchable
             )
 
         # ── Step 4: storage (battery) gets the UC net dispatch ────────────
