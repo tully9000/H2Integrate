@@ -390,6 +390,19 @@ class UCControl(SystemLevelControlBase):
                     # ax[1].plot(res["p_gas"][0,:], **kw)
                     # ax[1].set_title("P gas")
 
+                    p_discharge = res["p_discharge"]
+                    p_charge = res["p_charge"]
+                    np.array(
+                        [
+                            i
+                            for i in range(len(p_discharge))
+                            if ((p_charge[i] != 0) and (p_discharge[i] != 0))
+                        ]
+                    )
+
+                    ax[2].plot(p_charge, color="red", linestyle="dashed", alpha=0.9)
+                    ax[3].plot(p_discharge, color="red", linestyle="dashed", alpha=0.9)
+
                     plot_data(ax[2], res["p_discharge"], "P discharge", kw, prev_data[2])
                     # ax[2].plot(res["p_discharge"], **kw)
                     # ax[2].set_title("P discharge")
