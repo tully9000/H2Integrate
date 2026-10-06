@@ -7,6 +7,6 @@ general:
   folder_output: outputs
 recorder:
   flag: true
-  file: cases.sql
+  file: concurrent.sql
   overwrite_recorder: true
   recorder_attachment: driver

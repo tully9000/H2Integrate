@@ -4,9 +4,9 @@ description: This analysis runs a natural gas power plant with hybrid wind and s
   the natural gas plant and renewables are combined at the end to meet the demand. The financial performance of the natural
   gas plant and renewables are evaluated separately using ProFastLCO, and then combined for an overall LCOE and NPV.
 general:
-  folder_output: mppoc_playground/SLC_battery_SOC/outputs
+  folder_output: outputs
 recorder:
   flag: true
-  file: cases.sql
+  file: sequential.sql
   overwrite_recorder: true
   recorder_attachment: driver

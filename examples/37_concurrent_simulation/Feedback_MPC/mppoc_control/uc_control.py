@@ -271,11 +271,11 @@ class UCControl(SystemLevelControlBase):
 
         t = simulation_range.start
         while t < simulation_range.stop:
-            # if t > 200:
-            #     end = min(t + horizon, n)
-            #     impl = min(step, end - t)
-            #     t += impl
-            #     continue
+            if t > 200:
+                end = min(t + horizon, n)
+                impl = min(step, end - t)
+                t += impl
+                continue
 
             # Lookahead window [t, end); shrinks naturally near the year's end.
             end = min(t + horizon, n)
@@ -312,6 +312,98 @@ class UCControl(SystemLevelControlBase):
 
                 commit_carry = [int(round(res["u"][0, impl - 1]))]
                 self.soc_store[t : t + impl] = res["soc"][:impl]
+
+                if (t < 55) and (t > (55 - 24)):
+                    import matplotlib.pyplot as plt
+
+                    fig_label = f"uc_ctrl_t{t}"
+
+                    preexisting_fig = False
+
+                    open_fig_labels = plt.get_figlabels()
+                    if fig_label in open_fig_labels:
+                        fig = plt.figure(fig_label)
+                        ax = fig.get_axes()
+                        preexisting_fig = True
+                    else:
+                        fig, ax = plt.subplots(3, 2, sharex="all", layout="constrained")
+                        ax = np.ravel(ax)
+                        fig.suptitle(f"UC Control at: {t}")
+                        fig.set_label(fig_label)
+
+                    kw = {"alpha": 1}
+                    if self.n_steps_per_compute == 8760:
+                        kw["color"] = "blue"
+                        kw["linewidth"] = 3
+                    else:
+                        kw["color"] = "orange"
+
+                    prev_data = [None for i in range(len(ax))]
+
+                    if preexisting_fig:
+                        for i, axs in enumerate(ax):
+                            for ln in axs.lines:
+                                if self.n_steps_per_compute == 8760:
+                                    if ln.get_color() == "blue":
+                                        ln.set_alpha(0.25)
+                                    else:
+                                        continue
+                                else:
+                                    if ln.get_color() == "orange":
+                                        ln.set_alpha(0.25)
+                                    else:
+                                        if (ln.get_color() == "blue") and (ln.get_alpha() == 1):
+                                            prev_data[i] = ln.get_data()[1]
+                                        continue
+
+                    def plot_data(ax, data, name, kw, prev_data):
+                        if prev_data is not None:
+                            data_diff = data - prev_data
+                            diff_inds = np.where(np.abs(data_diff) > 1e-6)[0]
+
+                            # ax.scatter(diff_inds, np.ones(len(diff_inds)))
+                            for j in range(len(diff_inds)):
+                                ax.axvline(diff_inds[j], alpha=0.5, color="gray", zorder=0.1)
+
+                        ax.plot(data, **kw)
+                        ax.set_title(name)
+
+                    if self.n_steps_per_compute != 8760:
+                        text_pos = (0.25, 0.6)
+                    else:
+                        text_pos = (0.25, 0.4)
+
+                    ax[0].text(
+                        text_pos[0],
+                        text_pos[1],
+                        f"SOC carry: {soc_carry}",
+                        transform=ax[0].transAxes,
+                    )
+
+                    plot_data(ax[0], res["soc"], "SOC", kw, prev_data[0])
+
+                    # ax[0].plot(res["soc"], **kw)
+                    # ax[0].set_title("SOC")
+
+                    plot_data(ax[1], res["p_gas"][0, :], "P gas", kw, prev_data[1])
+
+                    # ax[1].plot(res["p_gas"][0,:], **kw)
+                    # ax[1].set_title("P gas")
+
+                    plot_data(ax[2], res["p_discharge"], "P discharge", kw, prev_data[2])
+                    # ax[2].plot(res["p_discharge"], **kw)
+                    # ax[2].set_title("P discharge")
+
+                    plot_data(ax[3], res["p_charge"], "P charge", kw, prev_data[3])
+                    # ax[3].plot(res["p_charge"], **kw)
+                    # ax[3].set_title("P charge")
+
+                    plot_data(ax[4], solar_w, "solar w", kw, prev_data[4])
+                    plot_data(ax[5], wind_w, "wind w", kw, prev_data[5])
+                    # plot_data(ax[4], res["p_solar"], "P solar", kw, prev_data[4])
+                    # plot_data(ax[5], res["p_wind"], "P wind", kw, prev_data[5])
+
+                    # []
 
             else:
                 # Fallback: gas covers the positive residual, battery idle,
