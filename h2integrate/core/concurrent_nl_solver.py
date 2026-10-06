@@ -1,3 +1,4 @@
+import tqdm
 import numpy as np
 from openmdao.recorders.recording_iteration_stack import Recording
 from openmdao.solvers.nonlinear.nonlinear_runonce import NonlinearRunOnce
@@ -109,7 +110,11 @@ class ConcurrentPlantNLBGSSolver(NonlinearBlockGS):
             system._discrete_inputs[sk] = True
 
         with Recording("NLRunOnce", 0, self):
-            for ss in sim_starts:
+            for i in tqdm.tqdm(range(len(sim_starts))):
+                # for ss in sim_starts:
+
+                ss = sim_starts[i]
+
                 # if (ss > 200) and (ss < 8730):
                 #     continue
 
@@ -122,9 +127,6 @@ class ConcurrentPlantNLBGSSolver(NonlinearBlockGS):
                     # that the relevant calculations will be computed just once.
                     for sk in skip_compute_keys:
                         system._discrete_inputs[sk] = False
-
-                # Run one GS iteration on the plant group
-                # self._gs_iter()
 
                 try:
                     self._solve()

@@ -55,7 +55,7 @@ plant:
   plant_life: 30
   simulation:
     n_timesteps: 8760
-    n_steps_per_compute: 24
+    n_steps_per_compute: 1
     dt: 3600
 # System-Level Controller: unit-commitment (UC) optimal dispatch.
 #

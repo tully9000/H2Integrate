@@ -105,19 +105,27 @@ if run_dict.get("seq", False) and run_dict.get("con", False):
         ax.set_title(k)
         ax.legend()
 
+    def plot_diff(ax, dicts, k):
+        diff = dicts["seq"][k]["val"] - dicts["con"][k]["val"]
+        ax.plot(diff)
+
     def plot_key(ax, k):
         if k in inputs_seq.keys():
-            plot_series(ax, all_inputs, k)
+            plot_series(ax[0], all_inputs, k)
+            plot_diff(ax[1], all_inputs, k)
         elif k in outputs_seq.keys():
-            plot_series(ax, all_outputs, k)
+            plot_series(ax[0], all_outputs, k)
+            plot_diff(ax[1], all_outputs, k)
 
-    fig, ax = plt.subplots(3, 1, sharex="all", layout="constrained")
+    fig, ax = plt.subplots(3, 2, sharex="all", layout="constrained")
 
-    plot_key(ax[0], "plant.battery.StoragePerformanceModel.SOC")
-    plot_key(ax[1], "plant.system_level_controller.wind_uncurtailed_electricity_out")
-    plot_key(ax[2], "plant.system_level_controller.solar_uncurtailed_electricity_out")
+    plot_key(ax[0, :], "plant.battery.StoragePerformanceModel.SOC")
+    plot_key(ax[1, :], "plant.wind.PYSAMWindPlantPerformanceModel.electricity_out")
+    plot_key(ax[2, :], "plant.solar.PYSAMSolarPlantPerformanceModel.electricity_out")
+    # plot_key(ax[1, :], "plant.system_level_controller.wind_uncurtailed_electricity_out")
+    # plot_key(ax[2, :], "plant.system_level_controller.solar_uncurtailed_electricity_out")
 
-    ax[0].set_xlim([0, 300])
+    # ax[0].set_xlim([0, 300])
 
     print("\n\n\n\n")
 
