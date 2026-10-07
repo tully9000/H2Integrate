@@ -43,7 +43,9 @@ framework does not scan ``system_level_control`` for ``model_location``).
 from __future__ import annotations
 
 import time
+import pickle
 import logging
+from pathlib import Path
 
 import numpy as np
 from mppoc_control.uc_model import build_uc_model, solve_uc_model, extract_uc_results
@@ -98,12 +100,15 @@ class UCControl(SystemLevelControlBase):
         self._wind_schedule = np.zeros(self.n_timesteps)
 
         self.soc_store = np.zeros(self.n_timesteps)
+        self.commit_store = np.zeros(self.n_timesteps)
 
         # Cumulative wall-clock time spent in the rolling-horizon UC MILP
         # solves (s), exposed as an OpenMDAO output so it is captured by the
         # SQL recorder. Accumulated across every (re)solve in
         # ``_solve_rolling_uc``; cache hits add nothing.
         self._total_solve_wall_s = 0.0
+        self._uc_debug_dir = Path(__file__).resolve().parent / "uc_debug"
+        self._uc_debug_dir.mkdir(exist_ok=True, parents=True)
         self.add_output(
             "uc_solve_wall_s",
             val=0.0,
@@ -140,6 +145,23 @@ class UCControl(SystemLevelControlBase):
             sim_range = self._get_compute_time_range([i * self.n_steps_per_compute])
             self._avail_frozen_dict.update({sim_range: False})
             self._prev_rated_dict.update({sim_range: False})
+
+    def _save_uc_params_debug(self, params, timestep):
+        """Persist a UC params dict so it can be reloaded later exactly."""
+        path = self._uc_debug_dir / f"uc_params_t{timestep}.pkl"
+        with path.open("wb") as f:
+            pickle.dump(params, f, protocol=pickle.HIGHEST_PROTOCOL)
+        logger.info("Saved UC params to %s", path)
+
+    def _load_uc_params_debug(self, timestep):
+        """Load a UC params dict saved by ``_save_uc_params_debug``."""
+        path = self._uc_debug_dir / f"uc_params_t{timestep}.pkl"
+        if not path.exists():
+            raise FileNotFoundError(f"UC params file not found: {path}")
+        with path.open("rb") as f:
+            params = pickle.load(f)
+        logger.info("Loaded UC params from %s", path)
+        return params
 
     # ------------------------------------------------------------------
     # MILP parameter construction
@@ -249,10 +271,11 @@ class UCControl(SystemLevelControlBase):
 
         if simulation_range.start == 0:
             soc_carry = self._soc_init
+            commit_carry = [0]  # gas starts off
         else:
             soc_carry = self.soc_store[simulation_range.start - 1]
+            commit_carry = [self.commit_store[simulation_range.start - 1]]  # gas starts off
 
-        commit_carry = [0]  # gas starts off
         p_max = self._gas_unit_params["P_max"]
 
         # Fast-test cap: only MILP-solve the first `cap` steps; the rest is
@@ -271,11 +294,11 @@ class UCControl(SystemLevelControlBase):
 
         t = simulation_range.start
         while t < simulation_range.stop:
-            if t > 200:
-                end = min(t + horizon, n)
-                impl = min(step, end - t)
-                t += impl
-                continue
+            # if t > 200:
+            #     end = min(t + horizon, n)
+            #     impl = min(step, end - t)
+            #     t += impl
+            #     continue
 
             # Lookahead window [t, end); shrinks naturally near the year's end.
             end = min(t + horizon, n)
@@ -292,6 +315,12 @@ class UCControl(SystemLevelControlBase):
                 "battery": {**self._battery_template, "SOC_init": soc_carry},
                 "initial_commitment": commit_carry,
             }
+
+            # if t == 48:
+            #     if self.n_steps_per_compute == 8760:
+            #         self._save_uc_params_debug(params, t)
+            #     else:
+            #         params_48 = self._load_uc_params_debug(t)
 
             m = build_uc_model(params)
             _, ok = solve_uc_model(m)
@@ -311,9 +340,12 @@ class UCControl(SystemLevelControlBase):
                 # soc_carry = measured_SOC[impl-1] * self._battery_template["E_capacity"]
 
                 commit_carry = [int(round(res["u"][0, impl - 1]))]
-                self.soc_store[t : t + impl] = res["soc"][:impl]
 
-                if (t < 55) and (t > (55 - 24)):
+                self.soc_store[t : t + impl] = res["soc"][:impl]
+                self.commit_store[t : t + impl] = res["u"][0, :impl]
+
+                # if (t < 55) and (t > (55 - 24)):
+                if (t < 55) and False:
                     import matplotlib.pyplot as plt
 
                     fig_label = f"uc_ctrl_t{t}"
@@ -411,10 +443,23 @@ class UCControl(SystemLevelControlBase):
                     # ax[3].plot(res["p_charge"], **kw)
                     # ax[3].set_title("P charge")
 
-                    plot_data(ax[4], solar_w, "solar w", kw, prev_data[4])
-                    plot_data(ax[5], wind_w, "wind w", kw, prev_data[5])
+                    # plot_data(ax[4], solar_w, "solar w", kw, prev_data[4])
+                    # plot_data(ax[5], wind_w, "wind w", kw, prev_data[5])
+
                     # plot_data(ax[4], res["p_solar"], "P solar", kw, prev_data[4])
                     # plot_data(ax[5], res["p_wind"], "P wind", kw, prev_data[5])
+
+                    b_g_sum = res["p_discharge"] + res["p_gas"][0, :]
+                    plot_data(ax[4], b_g_sum, "B G sum", kw, prev_data[4])
+
+                    plot_data(ax[5], res["u"][0, :], "Commit", kw, prev_data[5])
+
+                    ax[5].text(
+                        text_pos[0],
+                        text_pos[1],
+                        f"Commit carry: {commit_carry}",
+                        transform=ax[5].transAxes,
+                    )
 
                     # []
 
@@ -606,9 +651,10 @@ class UCControl(SystemLevelControlBase):
             sched = self._wind_schedule if is_wind[f] else self._solar_schedule
             with np.errstate(divide="ignore", invalid="ignore"):
                 share = np.where(total > 0, avail_by_tech[f] / total, 0.0)
-            outputs[f"{f}_{commodity}_set_point"][simulation_range] = (
-                share[simulation_range] * sched[simulation_range]
-            )
+            outputs[f"{f}_{commodity}_set_point"] = share * sched
+            # outputs[f"{f}_{commodity}_set_point"][simulation_range] = (
+            #     share[simulation_range] * sched[simulation_range]
+            # )
 
         # ── Step 3: dispatchable techs (gas) get the UC schedule ──────────
         dispatchables = [
@@ -616,8 +662,8 @@ class UCControl(SystemLevelControlBase):
         ]
         n_dispatchable = max(len(dispatchables), 1)
         for dispatchable_tech in dispatchables:
-            outputs[f"{dispatchable_tech}_{commodity}_set_point"][simulation_range] = (
-                self._gas_schedule[simulation_range] / n_dispatchable
+            outputs[f"{dispatchable_tech}_{commodity}_set_point"] = (
+                self._gas_schedule / n_dispatchable
             )
 
         # ── Step 4: storage (battery) gets the UC net dispatch ────────────

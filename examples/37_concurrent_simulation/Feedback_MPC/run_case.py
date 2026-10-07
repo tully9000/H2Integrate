@@ -20,12 +20,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent) + "/mppoc_control")
 from uc_control import UCControl
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from comparison_tools import Profiler
+
+
 supported_models["UCControl"] = UCControl
 
 run_dict = {
     "seq": True,
     "con": True,
 }
+
 
 run_dir = Path(__file__).parent
 fpath_config_sequential = Path(run_dir) / "config_sequential/case.yaml"
@@ -71,7 +76,9 @@ if run_dict.get("con", False):
     print(f"Concurrent setup time: {setup_time:.3f} s")
 
     start = time.perf_counter()
-    h2i_con.run()
+    pf = Profiler()
+    with pf:
+        h2i_con.run()
     run_time = time.perf_counter() - start
     print(f"Concurrent run time: {run_time:.3f} s")
 
@@ -119,11 +126,15 @@ if run_dict.get("seq", False) and run_dict.get("con", False):
 
     fig, ax = plt.subplots(3, 2, sharex="all", layout="constrained")
 
-    plot_key(ax[0, :], "plant.battery.StoragePerformanceModel.SOC")
-    plot_key(ax[1, :], "plant.wind.PYSAMWindPlantPerformanceModel.electricity_out")
-    plot_key(ax[2, :], "plant.solar.PYSAMSolarPlantPerformanceModel.electricity_out")
+    # plot_key(ax[0, :], "plant.battery.StoragePerformanceModel.SOC")
+    # plot_key(ax[1, :], "plant.wind.PYSAMWindPlantPerformanceModel.electricity_out")
+    # plot_key(ax[2, :], "plant.solar.PYSAMSolarPlantPerformanceModel.electricity_out")
     # plot_key(ax[1, :], "plant.system_level_controller.wind_uncurtailed_electricity_out")
     # plot_key(ax[2, :], "plant.system_level_controller.solar_uncurtailed_electricity_out")
+
+    plot_key(ax[0, :], "plant.system_level_controller.natural_gas_plant_electricity_set_point")
+    plot_key(ax[1, :], "plant.system_level_controller.solar_electricity_set_point")
+    plot_key(ax[2, :], "plant.system_level_controller.wind_electricity_set_point")
 
     # ax[0].set_xlim([0, 300])
 

@@ -2,8 +2,10 @@ import numpy as np
 import openmdao.api as om
 import numpy_financial as npf
 
+from h2integrate.core.model_baseclasses import SkippableComputeMixin
 
-class AdjustedCapexOpexComp(om.ExplicitComponent):
+
+class AdjustedCapexOpexComp(om.ExplicitComponent, SkippableComputeMixin):
     """
     OpenMDAO component to adjust CapEx and OpEx values for multiple technologies to a target
     dollar year using inflation.
@@ -31,12 +33,16 @@ class AdjustedCapexOpexComp(om.ExplicitComponent):
         total_opex_adjusted (float, USD/year): Total adjusted OpEx across all technologies.
     """
 
+    _is_steppable = True
+
     def initialize(self):
         self.options.declare("driver_config", types=dict)
         self.options.declare("tech_configs", types=dict)
         self.options.declare("plant_config", types=dict)
 
     def setup(self):
+        super().setup()
+
         tech_configs = self.options["tech_configs"]
         plant_config = self.options["plant_config"]
         self.inflation_rate = plant_config["finance_parameters"]["cost_adjustment_parameters"][
@@ -87,7 +93,7 @@ class AdjustedCapexOpexComp(om.ExplicitComponent):
         outputs["total_varopex_adjusted"] = total_varopex_adjusted
 
 
-class AdjustedCapacityFactorComp(om.ExplicitComponent):
+class AdjustedCapacityFactorComp(om.ExplicitComponent, SkippableComputeMixin):
     """OpenMDAO component to compute an adjusted capacity factor for a given commodity.
 
     This component takes in a timeseries of commodity production values and computes
@@ -105,11 +111,14 @@ class AdjustedCapacityFactorComp(om.ExplicitComponent):
             with shape ``(plant_life,)``. Unitless.
     """
 
+    _is_steppable = True
+
     def initialize(self):
         self.options.declare("plant_config", types=dict)
         self.options.declare("commodity_type", types=str)
 
     def setup(self):
+        super().setup()
         self.commodity = self.options["commodity_type"]
         plant_life = int(self.options["plant_config"]["plant"]["plant_life"])
         n_timesteps = int(self.options["plant_config"]["plant"]["simulation"]["n_timesteps"])
