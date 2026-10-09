@@ -51,6 +51,19 @@ def load_config(fpath):
 config_seq = load_config(fpath_config_sequential)
 config_con = load_config(fpath_config_steppable)
 
+horizon = 24
+control_step = 1
+
+config_seq["plant_config"]["system_level_control"]["control_parameters"]["uc_horizon"] = horizon
+config_seq["plant_config"]["system_level_control"]["control_parameters"]["uc_control_step"] = (
+    control_step
+)
+
+config_con["plant_config"]["system_level_control"]["control_parameters"]["uc_horizon"] = horizon
+config_con["plant_config"]["system_level_control"]["control_parameters"]["uc_control_step"] = (
+    control_step
+)
+
 if run_dict.get("seq", False):
     print("\n=== Sequential setup/run timing ===")
 
@@ -76,7 +89,7 @@ if run_dict.get("con", False):
     print(f"Concurrent setup time: {setup_time:.3f} s")
 
     start = time.perf_counter()
-    pf = Profiler()
+    pf = Profiler(run_profile=False)
     with pf:
         h2i_con.run()
     run_time = time.perf_counter() - start
@@ -126,12 +139,13 @@ if run_dict.get("seq", False) and run_dict.get("con", False):
 
     fig, ax = plt.subplots(3, 2, sharex="all", layout="constrained")
 
-    # plot_key(ax[0, :], "plant.battery.StoragePerformanceModel.SOC")
-    # plot_key(ax[1, :], "plant.wind.PYSAMWindPlantPerformanceModel.electricity_out")
-    # plot_key(ax[2, :], "plant.solar.PYSAMSolarPlantPerformanceModel.electricity_out")
+    plot_key(ax[0, :], "plant.battery.StoragePerformanceModel.SOC")
+    plot_key(ax[1, :], "plant.wind.PYSAMWindPlantPerformanceModel.electricity_out")
+    plot_key(ax[2, :], "plant.solar.PYSAMSolarPlantPerformanceModel.electricity_out")
     # plot_key(ax[1, :], "plant.system_level_controller.wind_uncurtailed_electricity_out")
     # plot_key(ax[2, :], "plant.system_level_controller.solar_uncurtailed_electricity_out")
 
+    fig, ax = plt.subplots(3, 2, sharex="all", layout="constrained")
     plot_key(ax[0, :], "plant.system_level_controller.natural_gas_plant_electricity_set_point")
     plot_key(ax[1, :], "plant.system_level_controller.solar_electricity_set_point")
     plot_key(ax[2, :], "plant.system_level_controller.wind_electricity_set_point")
