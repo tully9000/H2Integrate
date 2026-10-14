@@ -463,7 +463,13 @@ class PYSAMWindPlantPerformanceModel(WindPerformanceBaseClass):
 
         # outputs["total_capacity"] = self.system_model.Farm.system_capacity
         # outputs["annual_energy"] = self.system_model.Outputs.annual_energy
-        outputs["total_electricity_produced"] = outputs["electricity_out"].sum() * (self.dt / 3600)
+
+        # Use this calculation for total_electricity_produced if you want LCOE to
+        # reflect total electricity generated
+        outputs["total_electricity_produced"] = outputs["uncurtailed_electricity_out"].sum() * (
+            self.dt / 3600
+        )
+
         outputs["annual_electricity_produced"] = self.system_model.Outputs.annual_energy
         max_production = (
             self.n_timesteps * outputs["rated_electricity_production"] * (self.dt / 3600)

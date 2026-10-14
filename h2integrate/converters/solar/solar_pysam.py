@@ -444,7 +444,12 @@ class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
         dc_ac_ratio = self.system_model.value("dc_ac_ratio")
         outputs["system_capacity_AC"] = pv_capacity_kWdc / dc_ac_ratio
         outputs["rated_electricity_production"] = outputs["system_capacity_AC"]
-        outputs["total_electricity_produced"] = outputs["electricity_out"].sum() * (self.dt / 3600)
+
+        # Use this calculation for total_electricity_produced if you want LCOE to
+        # reflect total electricity generated
+        outputs["total_electricity_produced"] = outputs["uncurtailed_electricity_out"].sum() * (
+            self.dt / 3600
+        )
 
         max_production = (
             outputs["rated_electricity_production"] * self.n_timesteps * (self.dt / 3600)
