@@ -1,9 +1,17 @@
 # Changelog
 
+## Unreleased [TBD]
+- Add time-marching simulation capability (`n_timesteps_window`) to the h2integrate framework, with steppable example component models. [PR 857](https://github.com/NatLabRockies/H2Integrate/pull/857)
+
+- Added a documentation changelog and version indicator, and updated installation, environment variable, and contribution guidance. [PR 917](https://github.com/NatLabRockies/H2Integrate/pull/917)
+- Added user references for PEM electrolysis, transport, FLORIS, configuration files, and additional registered models, with API and example links. [PR 918](https://github.com/NatLabRockies/H2Integrate/pull/918)
+- Updated `make_price_breakdown()` and `run_profast()` in `profast_tools.py` so that fixed cost items and feedstock cost items are properly labelled. [PR 930](https://github.com/NatLabRockies/H2Integrate/pull/930)
+- Add data resampling capabilities to resource models via pandas methods. [PR 933](https://github.com/NatLabRockies/H2Integrate/pull/933)
+
+
 ## 0.10.0 [October 12, 2026]
 
 ### New Features
-
 - Add `PySAMWavePerformanceModel` and `WaveResource` to wrap PySAM MhkWave as an H2I performance model, replacing the HOPP wave module in example 09. [PR 825](https://github.com/NatLabRockies/H2Integrate/pull/825)
 - Added a new NLR wind resource model: HRRR MET Toolkit [PR 837](https://github.com/NatLabRockies/H2Integrate/pull/837)
 - Added a converter controller that implements a peak-load management heuristic. [PR 773](https://github.com/NatLabRockies/H2Integrate/pull/773)
@@ -35,7 +43,7 @@
 - Updated `PYSAMSolarPlantPerformanceModel` and `PYSAMWindPlantPerformanceModel` to support lifetime outputs. [PR #889](https://github.com/NatLabRockies/H2Integrate/pull/889)
 - Updated `PYSAMWavePlantPerformanceModel` to support lifetime performance output and aligned the PySAM solar, wind, and wave setup paths to validate lifetime options against plant life. [PR 895](https://github.com/NatLabRockies/H2Integrate/pull/895)
 - Added warnings into ProFAST finance models to handle zero capacity error cases and removed default 'null' value for lower and upper bounds of design variables in driver schema. [PR 896](https://github.com/NatLabRockies/H2Integrate/pull/896)
-- Allow the PySAM battery performance model to configure additional BatteryStateful parameters through `pysam_options`. [PR TBD](https://github.com/NatLabRockies/H2Integrate/pull/TBD)
+- Allow the PySAM battery performance model to configure additional BatteryStateful parameters through `pysam_options`. [PR 903](https://github.com/NatLabRockies/H2Integrate/pull/903)
 - Update API resource models to be able to be able to handle non-annual simulations. [PR 897](https://github.com/NatLabRockies/H2Integrate/pull/897)
 - Move PySAM model instantiation for wind and solar performance models to the `compute()` method, and validate recalculated wind power curves. [PR 909](https://github.com/NatLabRockies/H2Integrate/pull/909)
 
@@ -61,10 +69,12 @@
   - Example 12 now uses `PYSAMWindPlantPerformanceModel` (same 148 x 6 MW turbines), example 13 uses 44 GE 1.5 MW turbines (same 66 MW capacity), and example 26 uses 25 turbines instead of 100 for the FLORIS wind plant.
   - The OAE examples and tests now use at most 5 ED units instead of 10 (same maximum capacity), and the OAE unit and regression tests share a single model run.
 - Standardized base class module file names on the `_baseclass.py` suffix, including renaming `h2integrate/core/model_baseclasses.py` to `h2integrate/core/model_baseclass.py`; imports from the old module paths must be updated. [PR 900](https://github.com/NatLabRockies/H2Integrate/pull/900)
+- Added a seasonal `exclusive_control_months` feature to `PeakLoadManagementOptimizedStorageController`. During Exclusive Control Months the upstream MILP runs with a monthly cycle-energy cap; outside those months the controller solves an independent bill-minimization MILP against the local load. [PR 885](https://github.com/NatLabRockies/H2Integrate/pull/885)
 - Replaced the hand-maintained `supported_models` dictionary with a `@register` class decorator. The registry finds decorated classes by scanning the package source and still imports each model module only when that model is used. `no_cost_models` and `no_replacement_schedule_models` are now set with the decorator's `no_cost` and `no_replacement_schedule` arguments. [PR 902](https://github.com/NatLabRockies/H2Integrate/pull/902)
 - Pinned `optiwindnet<0.3.1` in the `ard` extra because `optiwindnet` 0.3.1 is incompatible with `ard-nrel` 0.1.0b5. [PR 902](https://github.com/NatLabRockies/H2Integrate/pull/902)
 - Updates to all GH Actions, pre-commit, isort, and ruff versioning. [PR 904](https://github.com/NatLabRockies/H2Integrate/pull/904)
 - Updated the docs throughout, removing stale references and ensuring consistency with the latest model and configuration changes. [PR 910](https://github.com/NatLabRockies/H2Integrate/pull/910)
+
 
 ### Fixes
 
