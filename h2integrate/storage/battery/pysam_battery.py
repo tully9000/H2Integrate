@@ -4,6 +4,7 @@ import PySAM.BatteryStateful as BatteryStateful
 from attrs import field, define, validators
 
 from h2integrate.core.utilities import merge_shared_inputs
+from h2integrate.core.supported_models import register
 from h2integrate.storage.storage_baseclass import (
     StoragePerformanceBase,
     StoragePerformanceBaseConfig,
@@ -48,6 +49,8 @@ class PySAMBatteryPerformanceModelConfig(StoragePerformanceBaseConfig):
             environment [W/m2*K]. Defaults to 20.
         resistance (int | float, optional): Battery internal resistance [Ohm].
             Defaults to 0.001.
+        pysam_options (dict, optional): Additional PySAM BatteryStateful parameters grouped
+            by PySAM group name (for example, ``{"ParamsCell": {"calendar_choice": 1}}``).
     """
 
     max_capacity: float = field(validator=validators.ge(0))
@@ -66,8 +69,10 @@ class PySAMBatteryPerformanceModelConfig(StoragePerformanceBaseConfig):
     Cp: int | float = field(default=900)
     battery_h: int | float = field(default=20)
     resistance: int | float = field(default=0.001)
+    pysam_options: dict = field(factory=dict)
 
 
+@register
 class PySAMBatteryPerformanceModel(StoragePerformanceBase):
     """OpenMDAO component wrapping the PySAM Battery Performance model.
 
@@ -122,6 +127,21 @@ class PySAMBatteryPerformanceModel(StoragePerformanceBase):
         # Initialize the PySAM BatteryStateful model with defaults
         self.system_model = BatteryStateful.default(self.config.chemistry)
 
+        reserved_options = {
+            "Controls": {"control_mode", "dt_hr", "input_current", "input_power"},
+            "ParamsCell": {"C_rate", "resistance", "initial_SOC", "minimum_SOC", "maximum_SOC"},
+            "ParamsPack": {"Cp", "h", "mass", "nominal_energy", "nominal_voltage", "surface_area"},
+        }
+        for group, parameters in self.config.pysam_options.items():
+            if group not in self.system_model.export():
+                raise ValueError(f"Unknown PySAM battery options group: {group}")
+            conflicting = reserved_options.get(group, set()).intersection(parameters)
+            if conflicting:
+                raise ValueError(
+                    f"PySAM battery options {group}.{', '.join(sorted(conflicting))} "
+                    "are managed by the battery model configuration."
+                )
+
     def compute(self, inputs, outputs, discrete_inputs=[], discrete_outputs=[]):
         """Run the PySAM Battery model for one simulation step.
 
@@ -173,6 +193,9 @@ class PySAMBatteryPerformanceModel(StoragePerformanceBase):
             self.system_model.value("minimum_SOC", self.config.min_soc_fraction * 100)
             self.system_model.value("maximum_SOC", self.config.max_soc_fraction * 100)
             self.system_model.value("initial_SOC", self.config.init_soc_fraction * 100)
+
+            if self.config.pysam_options:
+                self.system_model.assign(self.config.pysam_options)
 
             # Setup PySAM battery model using PySAM method
             self.system_model.setup()
@@ -238,8 +261,8 @@ class PySAMBatteryPerformanceModel(StoragePerformanceBase):
         # Loop through the provided input power/current (decided by control_variable)
         self.system_model.value("dt_hr", self.dt_hr)
 
-        # if soc_init is not None and self.n_steps_per_compute != 8760:
-        if self.n_steps_per_compute != 8760:
+        # if soc_init is not None and self.n_timesteps_window != 8760:
+        if self.n_timesteps_window != 8760:
             if sim_start_index == 0:
                 self.state_storage["current"]["state"] = self.system_model.export()
                 self.state_storage["current"]["index"] = sim_start_index
@@ -349,14 +372,14 @@ class PySAMBatteryPerformanceModel(StoragePerformanceBase):
 
             kw = {}
 
-            # if self.n_steps_per_compute == 8760:
+            # if self.n_timesteps_window == 8760:
             if not slc.endswith("Pyomo"):
                 kw["color"] = "blue"
                 kw["linewidth"] = 3
             else:
                 kw["color"] = "orange"
 
-            if preexisting_fig and self.n_steps_per_compute != 8760:
+            if preexisting_fig and self.n_timesteps_window != 8760:
                 for axs in ax:
                     for ln in axs.lines:
                         if ln.get_color() == "blue":

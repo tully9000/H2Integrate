@@ -220,6 +220,50 @@ def rename_dict_keys(input_dict, init_keyname, new_keyname):
     return input_dict
 
 
+def separate_shared_parameters(section_params: dict[str, dict]) -> tuple[dict, dict]:
+    """Separate shared keys from section-specific parameter dictionaries.
+
+    This helper identifies keys that appear in more than one section and returns
+    two dictionaries: the shared parameters and the remaining section-local
+    parameters. It preserves the first-seen value for each shared key.
+
+    Args:
+        section_params (dict[str, dict]): Mapping of model-input section names
+            to parameter dictionaries. Expected keys are typically
+            ``performance``, ``control``, ``cost``, and ``dispatch``. For
+            example, ``{"performance": {"capacity": 1, "profile": []},
+            "cost": {"capacity": 2, "cost_year": 2024}}`` produces
+            ``{"capacity": 1}`` as the shared parameters and leaves
+            ``profile`` and ``cost_year`` in their respective sections.
+
+    Returns:
+        tuple[dict, dict]: A ``(shared_parameters, section_only)`` tuple. The
+            first dictionary contains keys found in at least two sections; the
+            second maps each original section name to its non-shared entries.
+    """
+    if not section_params:
+        return {}, {}
+
+    param_counts = Counter()
+    for params in section_params.values():
+        for param_key in params:
+            param_counts[param_key] += 1
+
+    shared_param_keys = {key for key, count in param_counts.items() if count > 1}
+    shared_parameters = {}
+    section_only = {}
+
+    for section_name, params in section_params.items():
+        section_only[section_name] = {
+            key: value for key, value in params.items() if key not in shared_param_keys
+        }
+        for param_key in shared_param_keys:
+            if param_key in params and param_key not in shared_parameters:
+                shared_parameters[param_key] = params[param_key]
+
+    return shared_parameters, section_only
+
+
 def check_inputs(prob, tech: str, tech_info: dict, tech_config_path: str):
     """Check the user-input technology configuration inputs against the
     instantiated technology configuration classes to ensure that:
@@ -283,13 +327,18 @@ def check_inputs(prob, tech: str, tech_info: dict, tech_config_path: str):
 
     # Check for overlapping keys between any two sets of configurations to reconstruct
     # the shared parameters, and create a restructured configuration
-    all_parameters = (control_params, dispatch_params, cost_params, performance_params)
-    _share_check = Counter([x for el in all_parameters for x in set(el)])
-    shared = {k for k, v in _share_check.items() if v > 1}
-    shared_params = {k: control_params.pop(k) for k in shared.intersection(control_params)}
-    shared_params |= {k: dispatch_params.pop(k) for k in shared.intersection(dispatch_params)}
-    shared_params |= {k: cost_params.pop(k) for k in shared.intersection(cost_params)}
-    shared_params |= {k: performance_params.pop(k) for k in shared.intersection(performance_params)}
+    shared_params, restructured_sections = separate_shared_parameters(
+        {
+            "control_parameters": control_params,
+            "dispatch_parameters": dispatch_params,
+            "cost_parameters": cost_params,
+            "performance_parameters": performance_params,
+        }
+    )
+    control_params = restructured_sections.get("control_parameters", {})
+    dispatch_params = restructured_sections.get("dispatch_parameters", {})
+    cost_params = restructured_sections.get("cost_parameters", {})
+    performance_params = restructured_sections.get("performance_parameters", {})
     restructured_params = {
         "control_parameters": control_params,
         "dispatch_parameters": dispatch_params,
@@ -382,7 +431,7 @@ def percent_diff(v1, v2, tol=1e-8):
     return pd * 100
 
 
-def percent_diff_dicts(d1, d2, allow_dissimilar_keys=False, tol=1e-8):
+def percent_diff_dicts(d1, d2, tol=1e-8):
     """
     Take two input dicts with matching keys and return a third dict with the
     percent difference for each value stored in matching keys.
@@ -392,31 +441,28 @@ def percent_diff_dicts(d1, d2, allow_dissimilar_keys=False, tol=1e-8):
     Args:
         d1 (dict): First dict to compare
         d2 (dict): Second dict to compare
-        allow_dissimilar_keys (bool): Ignore the error if dicts have dissimilar keys
 
     Returns:
         (dict): Dict of percent differences between d1 and d2
 
     """
-    if (not allow_dissimilar_keys) and bool(
+    if bool(
         set(d1) ^ set(d2)
     ):  # if this is True, there are elements that are not in both dictionaries
         raise ValueError("dictionaries do not have the same set of keys")
 
     d_out = {}
-    # for k1, v1 in d1.items():
-    for k in set(d1) & set(d2):
-        v1 = d1[k]
-        v2 = d2[k]
+    for k1, v1 in d1.items():
+        v2 = d2[k1]
 
-        if callable(v1["val"]) or isinstance(v1["val"], dict | bool | str):
+        if isinstance(v1["val"], dict | bool | str):
             # If the H2I input or output is more complicated than an array, skip it
             continue
 
         pd = percent_diff(v1["val"], v2["val"], tol=tol)
 
         # Use the norm of any percent difference arrays so output is always a scalar
-        d_out.update({k: np.linalg.norm(pd)})
+        d_out.update({k1: np.linalg.norm(pd)})
 
     return d_out
 

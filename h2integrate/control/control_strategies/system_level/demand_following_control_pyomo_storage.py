@@ -69,9 +69,9 @@ class DemandFollowingControlPyomo(DemandFollowingControl, OptimizedDispatchStora
 
         self.n_timesteps = int(self.options["plant_config"]["plant"]["simulation"]["n_timesteps"])
 
-        self.n_steps_per_compute = int(
+        self.n_timesteps_window = int(
             self.options["plant_config"]["plant"]["simulation"].get(
-                "n_steps_per_compute", self.n_timesteps
+                "n_timesteps_window", self.n_timesteps
             )
         )
 
@@ -158,7 +158,7 @@ class DemandFollowingControlPyomo(DemandFollowingControl, OptimizedDispatchStora
             kw["color"] = "orange"
             # kw["linewidth"] = 3
 
-            if preexisting_fig and self.n_steps_per_compute != 8760:
+            if preexisting_fig and self.n_timesteps_window != 8760:
                 for axs in ax:
                     for ln in axs.lines:
                         if ln.get_color() == "orange":
@@ -283,7 +283,7 @@ class DemandFollowingControlPyomo(DemandFollowingControl, OptimizedDispatchStora
             kw["color"] = "orange"
             # kw["linewidth"] = 3
 
-            if preexisting_fig and self.n_steps_per_compute != 8760:
+            if preexisting_fig and self.n_timesteps_window != 8760:
                 for axs in ax:
                     for ln in axs.lines:
                         if ln.get_color() == "orange":

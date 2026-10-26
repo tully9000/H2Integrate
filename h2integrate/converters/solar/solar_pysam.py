@@ -5,12 +5,13 @@ import PySAM.Pvwattsv8 as Pvwatts
 from attrs import field, define, validators
 
 from h2integrate.core.utilities import BaseConfig, merge_shared_inputs
-from h2integrate.converters.tools import check_pysam_input_params
+from h2integrate.converters.tools import check_pysam_input_params, check_pysam_lifetime_options
+from h2integrate.core.supported_models import register
 from h2integrate.converters.solar.solar_baseclass import SolarPerformanceBaseClass
 
 
 @define(kw_only=True)
-class PYSAMSolarPlantPerformanceModelDesignConfig(BaseConfig):
+class PYSAMSolarPlantPerformanceModelConfig(BaseConfig):
     """Configuration class for design parameters of the solar pv plant.
         PYSAMSolarPlantPerformanceModel which uses the Pvwattsv8 module
         available in PySAM. PySAM documentation can be found
@@ -166,6 +167,7 @@ class PYSAMSolarPlantPerformanceModelDesignConfig(BaseConfig):
         return {"SystemDesign": design_dict}
 
 
+@register
 class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
     """
     An OpenMDAO component that wraps a SolarPlant model.
@@ -182,7 +184,7 @@ class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
     def setup(self):
         super().setup()
 
-        self.config = PYSAMSolarPlantPerformanceModelDesignConfig.from_dict(
+        self.config = PYSAMSolarPlantPerformanceModelConfig.from_dict(
             merge_shared_inputs(self.options["tech_config"]["model_inputs"], "performance"),
             strict=True,
             additional_cls_name=self.__class__.__name__,
@@ -202,11 +204,6 @@ class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
 
         self.add_output("system_capacity_AC", val=0.0, units="kW", desc="PV rated capacity in AC")
 
-        if self.config.create_model_from == "default":
-            self.system_model = Pvwatts.default(self.config.config_name)
-        elif self.config.create_model_from == "new":
-            self.system_model = Pvwatts.new(self.config.config_name)
-
         design_dict = self.config.create_input_dict()
 
         # update design_dict if user provides non-empty design information
@@ -219,14 +216,29 @@ class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
                 else:
                     design_dict.update({group: group_parameters})
 
+        check_pysam_lifetime_options(design_dict, self.plant_life, "dc_degradation")
+
         self.design_dict = design_dict
-        self.system_model.assign(design_dict)
+
+        # Unset input angles use the configured default model as their fallback
+        needs_default_angle = self.config.create_model_from == "default" and (
+            (self.config.tilt_angle_setting == "input" and self.config.tilt is None)
+            or (self.config.azimuth_angle_setting == "input" and self.config.azimuth is None)
+        )
+        system_model = None
+        if needs_default_angle:
+            system_model = Pvwatts.default(self.config.config_name)
+            # Apply user options before reading the configured angle defaults
+            system_model.assign(design_dict)
+
+        # Flag to avoid unnecessary re-calculation of PySAM model
+        self._PYSAM_model_has_been_executed = False
 
         # Flag to avoid unnecessary re-calculation of PySAM model
         self._PYSAM_model_has_been_executed = False
 
         if self.config.tilt_angle_setting == "input":
-            tilt = self.get_inital_angle_value("tilt")
+            tilt = self.get_initial_angle_value("tilt", system_model)
             self.add_input(
                 "tilt_angle",
                 val=tilt,
@@ -235,7 +247,7 @@ class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
             )
 
         if self.config.azimuth_angle_setting == "input":
-            azimuth = self.get_inital_angle_value("azimuth")
+            azimuth = self.get_initial_angle_value("azimuth", system_model)
             self.add_input(
                 "azimuth_angle",
                 val=azimuth,
@@ -243,7 +255,7 @@ class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
                 desc="Solar panel azimuth angle in degrees",
             )
 
-    def get_inital_angle_value(self, angle_name: str):
+    def get_initial_angle_value(self, angle_name: str, system_model):
         """Get the initial value to use for 'angle_name', based on either:
 
         - the user-input value at the top-level of the config (i.e., `config.angle_name`)
@@ -253,6 +265,7 @@ class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
 
         Args:
             angle_name (str): Either 'tilt' or azimuth'
+            system_model (PvWattsv8): PvWattsv8 object
 
         Raises:
             ValueError: if angle_name is not 'tilt' or 'azimuth'
@@ -282,7 +295,7 @@ class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
         # If using a default PySAM model, get tilt or azimuth from model if not specified
         if self.config.create_model_from == "default":
             # Return the default tilt or azimuth from the system model
-            return self.system_model.value(angle_name)
+            return system_model.value(angle_name)
 
         # If creating a new PySAM model, get tilt or azimuth from pysam_options or default value
         if self.config.create_model_from == "new":
@@ -427,36 +440,52 @@ class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
                     reformatted_data.update({new_key: values})
         return reformatted_data
 
-    def _execute_PYSAM_model(self, inputs, outputs, discrete_inputs, discrete_outputs):
-        pass
-
-    def _compute_outputs(self, inputs, outputs, discrete_inputs, discrete_outputs):
+    def _compute_outputs(self, inputs, outputs):
         # Range object for the slice of the total simulation to run in this
         # compute call
         simulation_range = self._get_compute_time_range(inputs["timestep_index"])
 
         # assign outputs
-        outputs["electricity_out"][simulation_range.start : simulation_range.stop] = (
-            self.system_model.Outputs.gen[simulation_range.start : simulation_range.stop]
-        )  # kW-dc
-
         pv_capacity_kWdc = self.system_model.value("system_capacity")
         dc_ac_ratio = self.system_model.value("dc_ac_ratio")
         outputs["system_capacity_AC"] = pv_capacity_kWdc / dc_ac_ratio
         outputs["rated_electricity_production"] = outputs["system_capacity_AC"]
 
-        # Use this calculation for total_electricity_produced if you want LCOE to
-        # reflect total electricity generated
-        outputs["total_electricity_produced"] = outputs["uncurtailed_electricity_out"].sum() * (
-            self.dt / 3600
-        )
+        if bool(self.design_dict.get("Lifetime", {}).get("system_use_lifetime_output", 0)):
+            # using lifetime results
+            # split the generation profile to have results per-year
+            generation_per_year = np.split(np.array(self.system_model.Outputs.gen), self.plant_life)
+            # sum the generation per-year
+            aep_per_year = np.array(generation_per_year).sum(axis=1)
+            # get the number of timesteps per year (should be the same for all years)
+            n_timesteps_per_year = np.array([len(k) for k in generation_per_year])
+            # output the first n_timesteps of the generation profile
+            outputs["electricity_out"][simulation_range] = np.array(self.system_model.Outputs.gen)[
+                : self.n_timesteps
+            ][simulation_range.start : simulation_range.stop]
+            # make production is the max production per-year
+            max_production = (
+                outputs["rated_electricity_production"] * n_timesteps_per_year * (self.dt / 3600)
+            )
+            outputs["annual_electricity_produced"] = aep_per_year
+            outputs["capacity_factor"] = outputs["annual_electricity_produced"] / max_production
+            outputs["total_electricity_produced"] = outputs["electricity_out"].sum() * (
+                self.dt / 3600
+            )
 
-        max_production = (
-            outputs["rated_electricity_production"] * self.n_timesteps * (self.dt / 3600)
-        )
-
-        outputs["capacity_factor"] = outputs["total_electricity_produced"] / max_production
-        outputs["annual_electricity_produced"] = self.system_model.value("ac_annual")
+        else:
+            # not using lifetime output, use results as-is
+            outputs["electricity_out"][simulation_range] = self.system_model.Outputs.gen[
+                simulation_range.start : simulation_range.stop
+            ]  # kW-AC
+            max_production = (
+                outputs["rated_electricity_production"] * self.n_timesteps * (self.dt / 3600)
+            )
+            outputs["annual_electricity_produced"] = self.system_model.value("ac_annual")
+            outputs["total_electricity_produced"] = outputs["electricity_out"].sum() * (
+                self.dt / 3600
+            )
+            outputs["capacity_factor"] = outputs["total_electricity_produced"] / max_production
 
         # Apply curtailment based on set_point
         self.apply_curtailment(inputs, outputs)
@@ -472,10 +501,19 @@ class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
             self.apply_curtailment(inputs, outputs)
             return
 
-        if not self._PYSAM_model_has_been_executed and (inputs["timestep_index"][0] == 0):
-            assert (
-                inputs["timestep_index"] == 0
-            ), "PYSAM model should only be executed at the start of the simulation"
+        simulation_range = self._get_compute_time_range(inputs["timestep_index"])
+
+        if not self._PYSAM_model_has_been_executed:
+            assert simulation_range.start == 0, (
+                "PYSAM model should only be executed at the start of the simulation"
+            )
+
+            if self.config.create_model_from == "default":
+                self.system_model = Pvwatts.default(self.config.config_name)
+            elif self.config.create_model_from == "new":
+                self.system_model = Pvwatts.new(self.config.config_name)
+
+            self.system_model.assign(self.design_dict)
 
             if "tilt_angle" in inputs:
                 tilt_angle = inputs["tilt_angle"][0]
@@ -520,7 +558,7 @@ class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
             self._PYSAM_model_has_been_executed = True
 
         # Re-set model execution flag at the end of the simulation
-        if int(inputs["timestep_index"][0]) + self.n_steps_per_compute >= self.n_timesteps:
+        if simulation_range.stop >= self.n_timesteps:
             self._PYSAM_model_has_been_executed = False
 
-        self._compute_outputs(inputs, outputs, discrete_inputs, discrete_outputs)
+        self._compute_outputs(inputs, outputs)

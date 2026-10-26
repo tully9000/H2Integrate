@@ -44,7 +44,7 @@ fig, ax = plt.subplots(3, 1, sharex="all", layout="constrained")
 if run_dict.get("run_sequential", False):
     config_seq = deepcopy(config)
     config_seq["plant_config"]["plant"]["simulation"]["n_timesteps"] = 8760
-    config_seq["plant_config"]["plant"]["simulation"]["n_steps_per_compute"] = 8760
+    config_seq["plant_config"]["plant"]["simulation"]["n_timesteps_window"] = 8760
 
     # Create an H2I model for standard year-long simulation
     h2i_seq = H2IntegrateModel(config_seq)
@@ -85,7 +85,7 @@ if run_dict.get("run_concurrent", False):
     config_con = deepcopy(config)
 
     config_con["plant_config"]["plant"]["simulation"]["n_timesteps"] = 8760
-    config_con["plant_config"]["plant"]["simulation"]["n_steps_per_compute"] = 12
+    config_con["plant_config"]["plant"]["simulation"]["n_timesteps_window"] = 12
 
     # Create an H2I model for steppable simulation
     h2i_con = H2IntegrateModel(config_con)
@@ -183,7 +183,7 @@ if run_dict.get("run_sequential_opt", False) or run_dict.get("run_concurrent_opt
 if run_dict.get("run_sequential_opt", False):
     config_seq = deepcopy(config)
     config_seq["plant_config"]["plant"]["simulation"]["n_timesteps"] = 8760
-    config_seq["plant_config"]["plant"]["simulation"]["n_steps_per_compute"] = 8760
+    config_seq["plant_config"]["plant"]["simulation"]["n_timesteps_window"] = 8760
 
     config_seq["driver_config"].update(opt_params)
 
@@ -201,7 +201,7 @@ if run_dict.get("run_concurrent_opt", False):
     config_con = deepcopy(config)
 
     config_con["plant_config"]["plant"]["simulation"]["n_timesteps"] = 8760
-    config_con["plant_config"]["plant"]["simulation"]["n_steps_per_compute"] = 12
+    config_con["plant_config"]["plant"]["simulation"]["n_timesteps_window"] = 12
 
     config_con["driver_config"].update(opt_params)
 

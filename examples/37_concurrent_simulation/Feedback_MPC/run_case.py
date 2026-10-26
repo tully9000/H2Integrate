@@ -64,7 +64,7 @@ config_con["plant_config"]["system_level_control"]["control_parameters"]["uc_hor
 config_con["plant_config"]["system_level_control"]["control_parameters"]["uc_control_step"] = (
     control_step
 )
-config_con["plant_config"]["plant"]["simulation"]["n_steps_per_compute"] = control_step
+config_con["plant_config"]["plant"]["simulation"]["n_timesteps_window"] = control_step
 
 
 timeseries_lco = {

@@ -121,9 +121,9 @@ class PyomoStorageControllerBaseClass(om.ExplicitComponent):
 
         self.n_timesteps = int(self.options["plant_config"]["plant"]["simulation"]["n_timesteps"])
 
-        self.n_steps_per_compute = int(
+        self.n_timesteps_window = int(
             self.options["plant_config"]["plant"]["simulation"].get(
-                "n_steps_per_compute", self.n_timesteps
+                "n_timesteps_window", self.n_timesteps
             )
         )
 
@@ -147,7 +147,7 @@ class PyomoStorageControllerBaseClass(om.ExplicitComponent):
             range: range of time indices
         """
         ti = int(time_index[0])
-        return range(ti, ti + self.n_steps_per_compute)
+        return range(ti, ti + self.n_timesteps_window)
 
     def compute(self, inputs, outputs, discrete_inputs, discrete_outputs):
         """Build Pyomo model blocks and assign the dispatch solver."""

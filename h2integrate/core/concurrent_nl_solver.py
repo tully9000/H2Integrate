@@ -24,10 +24,10 @@ class ConcurrentPlantNLSolver(NonlinearRunOnce):
         timestep_keys = [k for k in system._inputs.keys() if k.endswith("timestep_index")]
 
         n_timesteps = self.plant_config["plant"]["simulation"]["n_timesteps"]
-        n_steps_per_compute = self.plant_config["plant"]["simulation"]["n_steps_per_compute"]
+        n_timesteps_window = self.plant_config["plant"]["simulation"]["n_timesteps_window"]
 
         # Make time stepping loop
-        sim_starts = np.arange(0, n_timesteps, n_steps_per_compute)
+        sim_starts = np.arange(0, n_timesteps, n_timesteps_window)
 
         final_timestep_index = sim_starts[-1]
 
@@ -91,10 +91,10 @@ class ConcurrentPlantNLBGSSolver(NonlinearBlockGS):
         timestep_keys = [k for k in system._inputs.keys() if k.endswith("timestep_index")]
 
         n_timesteps = self.plant_config["plant"]["simulation"]["n_timesteps"]
-        n_steps_per_compute = self.plant_config["plant"]["simulation"]["n_steps_per_compute"]
+        n_timesteps_window = self.plant_config["plant"]["simulation"]["n_timesteps_window"]
 
         # Make time stepping loop
-        sim_starts = np.arange(0, n_timesteps, n_steps_per_compute)
+        sim_starts = np.arange(0, n_timesteps, n_timesteps_window)
 
         final_timestep_index = sim_starts[-1]
 

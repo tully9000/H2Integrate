@@ -2,7 +2,7 @@ import numpy as np
 import openmdao.api as om
 import numpy_financial as npf
 
-from h2integrate.core.model_baseclasses import SkippableComputeMixin
+from h2integrate.core.model_baseclass import SkippableComputeMixin
 
 
 class AdjustedCapexOpexComp(om.ExplicitComponent, SkippableComputeMixin):

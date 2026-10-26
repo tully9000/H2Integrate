@@ -24,7 +24,7 @@ class PassthroughController(om.ExplicitComponent):
     def initialize(self):
         self.options.declare("commodity", types=str)
         self.options.declare("n_timesteps", types=int)
-        self.options.declare("n_steps_per_compute", types=int)
+        self.options.declare("n_timesteps_window", types=int)
         self.options.declare(
             "commodity_rate_units",
             types=str,
@@ -41,7 +41,7 @@ class PassthroughController(om.ExplicitComponent):
         n_timesteps = self.options["n_timesteps"]
         commodity_rate_units = self.options["commodity_rate_units"]
 
-        self.n_steps_per_compute = self.options["n_steps_per_compute"]
+        self.n_timesteps_window = self.options["n_timesteps_window"]
 
         # Use explicit units on the input when available so that the
         # variable remains valid even when no SLC is connected
@@ -92,7 +92,7 @@ class PassthroughController(om.ExplicitComponent):
 
     def compute(self, inputs, outputs):
         timestep_index = int(inputs["timestep_index"][0])
-        simulation_range = range(timestep_index, timestep_index + self.n_steps_per_compute)
+        simulation_range = range(timestep_index, timestep_index + self.n_timesteps_window)
 
         commodity = self.options["commodity"]
         outputs[f"{commodity}_command_value"][simulation_range] = inputs[f"{commodity}_set_point"][

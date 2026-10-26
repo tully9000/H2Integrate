@@ -30,7 +30,7 @@ config["plant_config"] = load_plant_yaml(config_root / config["plant_config"])
 # Run simulation sequentially one subsystem at a time
 if run_dict.get("run_sequential", False):
     config_seq = deepcopy(config)
-    config_seq["plant_config"]["plant"]["simulation"].pop("n_steps_per_compute")
+    config_seq["plant_config"]["plant"]["simulation"].pop("n_timesteps_window")
 
     # Create an H2I model for standard year-long simulation
     h2i_seq = H2IntegrateModel(config_seq)
@@ -58,7 +58,7 @@ if run_dict.get("run_concurrent", False):
     config_con = deepcopy(config)
 
     config_con["plant_config"]["plant"]["simulation"]["n_timesteps"] = 8760
-    config_con["plant_config"]["plant"]["simulation"]["n_steps_per_compute"] = 24
+    config_con["plant_config"]["plant"]["simulation"]["n_timesteps_window"] = 24
 
     # Create an H2I model for steppable simulation
     h2i_con = H2IntegrateModel(config_con)

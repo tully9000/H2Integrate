@@ -8,6 +8,8 @@ import matplotlib.pyplot as plt
 from attrs import field, define, validators
 
 from h2integrate.core.utilities import BaseConfig, merge_shared_inputs
+from h2integrate.converters.tools import check_pysam_lifetime_options
+from h2integrate.core.supported_models import register
 from h2integrate.converters.wind.wind_plant_baseclass import WindPerformanceBaseClass
 from h2integrate.converters.wind.layout.simple_grid_layout import (
     BasicGridLayoutConfig,
@@ -129,6 +131,7 @@ class PYSAMWindPlantPerformanceModelConfig(BaseConfig):
             "AdjustmentFactors",
             "HybridCosts",
             "Uncertainty",
+            "Lifetime",
         ]
         if bool(self.pysam_options):
             invalid_groups = [k for k in self.pysam_options if k not in valid_groups]
@@ -177,6 +180,7 @@ class PYSAMWindPlantPerformanceModelConfig(BaseConfig):
         return design_dict
 
 
+@register
 class PYSAMWindPlantPerformanceModel(WindPerformanceBaseClass):
     """
     An OpenMDAO component that wraps a WindPlant model.
@@ -255,11 +259,6 @@ class PYSAMWindPlantPerformanceModel(WindPerformanceBaseClass):
             desc="turbine hub-height in meters",
         )
 
-        if self.config.create_model_from == "default":
-            self.system_model = Windpower.default(self.config.config_name)
-        elif self.config.create_model_from == "new":
-            self.system_model = Windpower.new()
-
         design_dict = self.config.create_input_dict()
         if bool(self.config.pysam_options):
             for group, group_parameters in self.config.pysam_options.items():
@@ -267,7 +266,10 @@ class PYSAMWindPlantPerformanceModel(WindPerformanceBaseClass):
                     design_dict[group].update(group_parameters)
                 else:
                     design_dict.update({group: group_parameters})
-        self.system_model.assign(design_dict)
+
+        design_dict = check_pysam_lifetime_options(design_dict, self.plant_life, "ac_degradation")
+
+        self.design_dict = design_dict.copy()
 
         self.data_to_field_number = {
             "temperature": 1,
@@ -399,10 +401,11 @@ class PYSAMWindPlantPerformanceModel(WindPerformanceBaseClass):
         }
         return data
 
-    def recalculate_power_curve(self, rotor_diameter, turbine_rating_kw):
+    def recalculate_power_curve(self, system_model, rotor_diameter, turbine_rating_kw):
         """Update the turbine power curve for a given rotor diameter and rated turbine capacity.
 
         Args:
+            system_model (Windpower): PySAM Windpower object
             rotor_diameter (int): turbine rotor diameter in meters.
             turbine_rating_kw (float | int): desired turbine rated capacity in kW
 
@@ -419,7 +422,7 @@ class PYSAMWindPlantPerformanceModel(WindPerformanceBaseClass):
         old_ct_curve = list(turbine_opts.get("wind_turbine_ct_curve", []))
         old_windspeeds = list(turbine_opts.get("wind_turbine_powercurve_windspeeds", []))
 
-        self.system_model.Turbine.calculate_powercurve(
+        system_model.Turbine.calculate_powercurve(
             turbine_rating_kw,
             int(rotor_diameter),
             self.power_curve_config.elevation,
@@ -433,7 +436,7 @@ class PYSAMWindPlantPerformanceModel(WindPerformanceBaseClass):
 
         # Resample the CT curve (if one was provided) onto the regenerated windspeeds so
         # the two arrays remain length-aligned for PySAM execution.
-        new_windspeeds = list(self.system_model.value("wind_turbine_powercurve_windspeeds"))
+        new_windspeeds = list(system_model.value("wind_turbine_powercurve_windspeeds"))
         if (
             len(old_ct_curve) > 0
             and len(old_windspeeds) == len(old_ct_curve)
@@ -444,13 +447,11 @@ class PYSAMWindPlantPerformanceModel(WindPerformanceBaseClass):
                 np.asarray(old_windspeeds, dtype=float),
                 np.asarray(old_ct_curve, dtype=float),
             )
-            self.system_model.value("wind_turbine_ct_curve", tuple(resampled_ct.tolist()))
+            system_model.value("wind_turbine_ct_curve", tuple(resampled_ct.tolist()))
 
-        success = False
-        if max(self.system_model.value("wind_turbine_powercurve_powerout")) == float(
-            turbine_rating_kw
-        ):
-            success = True
+        max_power_from_curve = max(system_model.value("wind_turbine_powercurve_powerout"))
+        success = np.isclose(max_power_from_curve, float(turbine_rating_kw), rtol=1e-12, atol=1e-9)
+
         return success
 
     def _compute_outputs(self, inputs, outputs, discrete_inputs, discrete_outputs):
@@ -493,42 +494,56 @@ class PYSAMWindPlantPerformanceModel(WindPerformanceBaseClass):
             self.apply_curtailment(inputs, outputs)
             return
 
+        simulation_range = self._get_compute_time_range(inputs["timestep_index"])
+
+        if self.config.create_model_from == "default":
+            system_model = Windpower.default(self.config.config_name)
+        elif self.config.create_model_from == "new":
+            system_model = Windpower.new()
+
+        design_dict = self.design_dict.copy()
+
+        if "Lifetime" in design_dict and not hasattr(system_model, "Lifetime"):
+            design_dict.pop("Lifetime")
+
+        system_model.assign(design_dict)
+
         if not self._PYSAM_model_has_been_executed:
             # format resource data and input into model
             data = self.format_resource_data(
                 inputs["hub_height"][0], discrete_inputs["wind_resource_data"]
             )
-            self.system_model.value("wind_resource_data", data)
+            system_model.value("wind_resource_data", data)
 
             # recalculate power curve based on rotor diameter and turbine rating
             success = True
             if self.config.run_recalculate_power_curve:
-                success = self.recalculate_power_curve(rotor_diameter, turbine_rating_kw)
+                success = self.recalculate_power_curve(
+                    system_model, rotor_diameter, turbine_rating_kw
+                )
 
             # if power-curve could not be adjusted to match input values
             if not success:
                 msg = (
-                    "Could not adjust turbine powercurve to match turbine rating of ",
-                    f"{turbine_rating_kw} kW with a rotor diameter of {rotor_diameter} meters",
+                    "Could not adjust turbine powercurve to match turbine rating of "
+                    f"{turbine_rating_kw} kW with a rotor diameter of {rotor_diameter} meters"
                 )
                 raise ValueError(msg)
 
             # assign new turbine specs to the model
-            turbine_rated_power_kW = max(
-                self.system_model.value("wind_turbine_powercurve_powerout")
-            )
+            turbine_rated_power_kW = max(system_model.value("wind_turbine_powercurve_powerout"))
             farm_capacity = turbine_rated_power_kW * n_turbs
-            self.system_model.value("wind_turbine_rotor_diameter", rotor_diameter)
-            self.system_model.value("wind_turbine_hub_ht", inputs["hub_height"][0])
-            self.system_model.value("system_capacity", farm_capacity)
+            system_model.value("wind_turbine_rotor_diameter", rotor_diameter)
+            system_model.value("wind_turbine_hub_ht", inputs["hub_height"][0])
+            system_model.value("system_capacity", farm_capacity)
 
             # make layout for number of turbines
             if self.layout_mode == "basicgrid":
                 x_pos, y_pos = make_basic_grid_turbine_layout(
-                    self.system_model.value("wind_turbine_rotor_diameter"),
-                    n_turbs,
-                    self.layout_config,
+                    system_model.value("wind_turbine_rotor_diameter"), n_turbs, self.layout_config
                 )
+
+            self.system_model = system_model
 
             # Override the 300-turbine maximum, if needed
             if n_turbs > 300:
@@ -545,7 +560,8 @@ class PYSAMWindPlantPerformanceModel(WindPerformanceBaseClass):
             self._PYSAM_model_has_been_executed = True
 
         # Re-set model execution flag at the end of the simulation
-        if int(inputs["timestep_index"][0]) + self.n_steps_per_compute >= self.n_timesteps:
+        # if int(inputs["timestep_index"][0]) + self.n_timesteps_window >= self.n_timesteps:
+        if simulation_range.stop >= self.n_timesteps:
             self._PYSAM_model_has_been_executed = False
 
         self._compute_outputs(inputs, outputs, discrete_inputs, discrete_outputs)
@@ -579,8 +595,12 @@ class PYSAMWindPlantPerformanceModel(WindPerformanceBaseClass):
             if ax is None:
                 _, ax = plt.subplots()
 
-            xpos = self.system_model.value("wind_farm_xCoordinates")
-            ypos = self.system_model.value("wind_farm_yCoordinates")
+            # NOTE: this would require setting the system_model attribute just for plotting
+            # ...
+            # xpos = system_model.value("wind_farm_xCoordinates")
+            # ypos = system_model.value("wind_farm_yCoordinates")
+            xpos = getattr(self, "x_coords", [0.0])
+            ypos = getattr(self, "y_coords", [0.0])
 
             # Generate plotting dictionary
             default_plotting_dict = {

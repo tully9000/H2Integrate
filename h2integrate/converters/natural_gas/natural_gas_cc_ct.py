@@ -2,11 +2,13 @@ import numpy as np
 from attrs import field, define, validators
 
 from h2integrate.core.utilities import BaseConfig, merge_shared_inputs
-from h2integrate.core.model_baseclasses import (
+from h2integrate.reliability.models import PerformanceReliability
+from h2integrate.core.model_baseclass import (
     CostModelBaseClass,
     CostModelBaseConfig,
     PerformanceModelBaseClass,
 )
+from h2integrate.core.supported_models import register
 
 
 @define(kw_only=True)
@@ -31,6 +33,7 @@ class NaturalGasPerformanceConfig(BaseConfig):
     heat_rate_mmbtu_per_mwh: float = field(validator=validators.gt(0))
 
 
+@register
 class NaturalGasPerformanceModel(PerformanceModelBaseClass):
     """
     Performance model for natural gas power plants.
@@ -67,6 +70,7 @@ class NaturalGasPerformanceModel(PerformanceModelBaseClass):
         self.commodity = "electricity"
         self.commodity_rate_units = "MW"
         self.commodity_amount_units = "MW*h"
+        self.reliability_model = None
 
     def setup(self):
         super().setup()
@@ -75,6 +79,18 @@ class NaturalGasPerformanceModel(PerformanceModelBaseClass):
             merge_shared_inputs(self.options["tech_config"]["model_inputs"], "performance"),
             additional_cls_name=self.__class__.__name__,
         )
+        if use_reliability := "reliability" in self.options["tech_config"]["model_inputs"]:
+            plant_simulation_config = self.options["plant_config"]["plant"]["simulation"]
+            simulation_config = {
+                "simulation": {
+                    "dt": plant_simulation_config.get("dt", 3600),
+                    "n_timesteps": plant_simulation_config.get("n_timesteps", 8760),
+                },
+            }
+            config = self.options["tech_config"]["model_inputs"]["reliability"]
+            use_reliability = config.get("use_reliability", use_reliability)
+            self.reliability_model = PerformanceReliability.from_dict(config | simulation_config)
+        self.use_reliability = use_reliability
 
         # Add natural gas consumed output
         self.add_output(
@@ -156,11 +172,14 @@ class NaturalGasPerformanceModel(PerformanceModelBaseClass):
         heat_rate_mmbtu_per_mwh = inputs["heat_rate_mmbtu_per_mwh"]
         max_natural_gas_consumption = system_capacity * heat_rate_mmbtu_per_mwh
 
-        # electrical command value, saturated at maximum rated system capacity
-        electricity_command_value = np.where(
-            inputs["electricity_command_value"][simulation_range] > system_capacity,
-            system_capacity,
-            inputs["electricity_command_value"][simulation_range],
+        available_capacity = system_capacity
+        if self.use_reliability:
+            self.reliability_model.run()
+            available_capacity = system_capacity * self.reliability_model.availability
+
+        # electrical command value, saturated at the available system capacity
+        electricity_command_value = np.minimum(
+            inputs["electricity_command_value"], available_capacity
         )
         natural_gas_demand = electricity_command_value * heat_rate_mmbtu_per_mwh
 
@@ -183,7 +202,7 @@ class NaturalGasPerformanceModel(PerformanceModelBaseClass):
             np.minimum(  # we are limitied by either
                 natural_gas_available
                 / heat_rate_mmbtu_per_mwh,  # the power available in the natural gas supply
-                system_capacity,  # or the rated power of the system
+                available_capacity,  # or the available power of the system
             )
             - electricity_out
         )  # and subtracting out what we're using gives the available excess capacity
@@ -234,6 +253,7 @@ class NaturalGasCostModelConfig(CostModelBaseConfig):
     variable_opex_per_mwh: float | int = field(validator=validators.ge(0))
 
 
+@register
 class NaturalGasCostModel(CostModelBaseClass):
     """
     Cost model for natural gas power plants.

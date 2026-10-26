@@ -1,10 +1,12 @@
 import numpy as np
 
-from h2integrate.control.control_strategies.system_level.system_level_control_base import (
+from h2integrate.core.supported_models import register
+from h2integrate.control.control_strategies.system_level.system_level_control_baseclass import (
     SystemLevelControlBase,
 )
 
 
+@register
 class DemandFollowingControl(SystemLevelControlBase):
     """Demand-following system-level controller.
 
@@ -118,7 +120,7 @@ class DemandFollowingControl(SystemLevelControlBase):
             kw["color"] = "blue"
             kw["linewidth"] = 3
 
-            if preexisting_fig and self.n_steps_per_compute != 8760:
+            if preexisting_fig and self.n_timesteps_window != 8760:
                 for axs in ax:
                     for ln in axs.lines:
                         if ln.get_color() == "blue":

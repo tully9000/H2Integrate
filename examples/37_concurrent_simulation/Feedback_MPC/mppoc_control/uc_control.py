@@ -140,9 +140,9 @@ class UCControl(SystemLevelControlBase):
         self._avail_frozen_dict = {}
         self._prev_rated_dict = {}
 
-        n_windows = int(self.n_timesteps / self.n_steps_per_compute)
+        n_windows = int(self.n_timesteps / self.n_timesteps_window)
         for i in range(n_windows):
-            sim_range = self._get_compute_time_range([i * self.n_steps_per_compute])
+            sim_range = self._get_compute_time_range([i * self.n_timesteps_window])
             self._avail_frozen_dict.update({sim_range: False})
             self._prev_rated_dict.update({sim_range: False})
 
@@ -317,7 +317,7 @@ class UCControl(SystemLevelControlBase):
             }
 
             # if t == 48:
-            #     if self.n_steps_per_compute == 8760:
+            #     if self.n_timesteps_window == 8760:
             #         self._save_uc_params_debug(params, t)
             #     else:
             #         params_48 = self._load_uc_params_debug(t)
@@ -339,7 +339,7 @@ class UCControl(SystemLevelControlBase):
                 soc_carry = float(res["soc"][impl - 1])
                 # soc_carry = measured_SOC[impl-1] * self._battery_template["E_capacity"]
 
-                commit_carry = [int(round(res["u"][0, impl - 1]))]
+                commit_carry = [round(res["u"][0, impl - 1])]
 
                 self.soc_store[t : t + impl] = res["soc"][:impl]
                 self.commit_store[t : t + impl] = res["u"][0, :impl]
@@ -364,7 +364,7 @@ class UCControl(SystemLevelControlBase):
                         fig.set_label(fig_label)
 
                     kw = {"alpha": 1}
-                    if self.n_steps_per_compute == 8760:
+                    if self.n_timesteps_window == 8760:
                         kw["color"] = "blue"
                         kw["linewidth"] = 3
                     else:
@@ -375,7 +375,7 @@ class UCControl(SystemLevelControlBase):
                     if preexisting_fig:
                         for i, axs in enumerate(ax):
                             for ln in axs.lines:
-                                if self.n_steps_per_compute == 8760:
+                                if self.n_timesteps_window == 8760:
                                     if ln.get_color() == "blue":
                                         ln.set_alpha(0.25)
                                     else:
@@ -400,7 +400,7 @@ class UCControl(SystemLevelControlBase):
                         ax.plot(data, **kw)
                         ax.set_title(name)
 
-                    if self.n_steps_per_compute != 8760:
+                    if self.n_timesteps_window != 8760:
                         text_pos = (0.25, 0.6)
                     else:
                         text_pos = (0.25, 0.4)
