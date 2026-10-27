@@ -19,6 +19,134 @@ model.run()
 
 model.post_process()
 
+
+from io import StringIO
+from pathlib import Path
+
+import pyomo.environ as pyo
+from pyomo.network import Arc, Port
+
+
+pyomo_model = model.plant.battery.OptimizedDispatchStorageController.pyomo_model
+hybrid_dispatch_model = model.plant.battery.OptimizedDispatchStorageController.hybrid_dispatch_model
+
+model_unexpanded = (
+    model.plant.battery.OptimizedDispatchStorageController.hybrid_dispatch_rule.model_unexpanded
+)
+
+with (Path(__file__).parent / "run_pyomo_optimized_dispatch_out" / "pyomo_problem.txt").open(
+    "w"
+) as f:
+    buffer = StringIO()
+    # pyomo_model.pprint(ostream = buffer)
+    hybrid_dispatch_model.pprint(ostream=buffer)
+    f.write(buffer.getvalue())
+
+with (Path(__file__).parent / "run_pyomo_optimized_dispatch_out" / "pyomo_arcs.txt").open("w") as f:
+    buffer = StringIO()
+
+    for arc in hybrid_dispatch_model.component_objects(Arc):
+        arc.pprint(ostream=buffer)
+    f.write(buffer.getvalue())
+
+
+with (Path(__file__).parent / "run_pyomo_optimized_dispatch_out" / "pyomo_ports.txt").open(
+    "w"
+) as f:
+    buffer = StringIO()
+
+    for port in hybrid_dispatch_model.component_objects(Port):
+        port.pprint(ostream=buffer)
+    f.write(buffer.getvalue())
+
+with (Path(__file__).parent / "run_pyomo_optimized_dispatch_out" / "pyomo_blocks.txt").open(
+    "w"
+) as f:
+    buffer = StringIO()
+
+    for block in hybrid_dispatch_model.block_data_objects():
+        block.pprint(ostream=buffer)
+    f.write(buffer.getvalue())
+
+
+# list(pyomo_model.component_objects(Arc))
+# list(pyomo_model.component_objects(Port))
+list(hybrid_dispatch_model.component_objects(Arc))
+list(hybrid_dispatch_model.component_objects(Port))
+
+
+# --- Inspect all Ports ---
+print("--- PORTS ---")
+for port in hybrid_dispatch_model.component_objects(Port, active=True):
+    print(f"Port Name: {port.name}")
+    # Inspect variables inside the port
+    for var_name, var_obj in port.vars.items():
+        print(f"  - Member: {var_name} -> {var_obj}")
+
+# --- Inspect all Arcs ---
+print("\n--- ARCS ---")
+for arc in hybrid_dispatch_model.component_objects(Arc, active=True):
+    # Retrieve the source and destination ports
+    src = arc.source  # or arc.src
+    dest = arc.destination  # or arc.dest
+    print(f"Arc: {arc.name} | Source: {src.name} -> Destination: {dest.name}")
+
+# Traverse and print the block tree hierarchy
+for block in hybrid_dispatch_model.block_data_objects(descend_into=True):
+    # Calculate depth based on the block's naming dots
+    depth = block.name.count(".")
+    indent = "  " * depth
+    print(f"{indent}└── [Block] {block.name}")
+
+# Print only active variables and their current values
+print("--- Variables ---")
+for v in hybrid_dispatch_model.component_objects(pyo.Var, active=True):
+    if "[0]" not in v.name:
+        continue
+    print(f"Variable {v.name}:")
+    # for index in v:
+    #     print(f"  Index {index}: Value = {pyo.value(v[index])}")
+
+# Print only constraints and their body evaluations
+print("\n--- Constraints ---")
+for c in hybrid_dispatch_model.component_objects(pyo.Constraint, active=True):
+    print(f"Constraint {c.name}:")
+    for index in c:
+        print(f"  Index {index}: {pyo.value(c[index].body)} <= {pyo.value(c[index].upper)}")
+
+
+t = 10
+blk = hybrid_dispatch_model.plant[t]
+
+for blk in hybrid_dispatch_model.block_data_objects():
+    if not blk.name.endswith("[0]"):
+        continue
+
+    print(f"\n\nBlock: {blk.name}")
+
+    for name, comp in blk.component_map().items():
+        if isinstance(comp, pyo.Param):
+            print("PARAM:", name, "value =", comp.value)
+        elif isinstance(comp, pyo.Var):
+            print("VAR:  ", name, "value =", comp.value)
+        elif isinstance(comp, pyo.Constraint):
+            print("CONS: ", name, "expr =", comp.expr)
+
+
+blk = list(hybrid_dispatch_model.block_data_objects())[1]
+
+
+print(f"Block: {blk.name}")
+
+for name, comp in blk.component_map().items():
+    if isinstance(comp, pyo.Param):
+        print("PARAM:", name, "value =", comp.value)
+    elif isinstance(comp, pyo.Var):
+        print("VAR:  ", name, "value =", comp.value)
+    elif isinstance(comp, pyo.Constraint):
+        print("CONS: ", name, "expr =", comp.expr)
+
+
 # Plot the results
 fig, ax = plt.subplots(2, 1, sharex=True, figsize=(8, 6))
 

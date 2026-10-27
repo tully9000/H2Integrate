@@ -63,6 +63,7 @@ class NaturalGasPerformanceModel(PerformanceModelBaseClass):
         3600,
     )  # (min, max) time step lengths (in seconds) compatible with this model
     _control_classifier = "dispatchable"
+    _is_steppable = True
 
     def initialize(self):
         super().initialize()
@@ -164,6 +165,8 @@ class NaturalGasPerformanceModel(PerformanceModelBaseClass):
                 and unmet_electricity_demand.
         """
 
+        simulation_range = self._get_compute_time_range(inputs["timestep_index"])
+
         # calculate max input and output
         system_capacity = inputs["system_capacity"]  # plant capacity in MW
         heat_rate_mmbtu_per_mwh = inputs["heat_rate_mmbtu_per_mwh"]
@@ -182,9 +185,9 @@ class NaturalGasPerformanceModel(PerformanceModelBaseClass):
 
         # available feedstock, saturated at maximum system feedstock consumption
         natural_gas_available = np.where(
-            inputs["natural_gas_in"] > max_natural_gas_consumption,
+            inputs["natural_gas_in"][simulation_range] > max_natural_gas_consumption,
             max_natural_gas_consumption,
-            inputs["natural_gas_in"],
+            inputs["natural_gas_in"][simulation_range],
         )
 
         # natural gas consumed is minimum between available feedstock and output demand
@@ -193,10 +196,10 @@ class NaturalGasPerformanceModel(PerformanceModelBaseClass):
         # Convert natural gas consumption to electricity output using heat rate
         electricity_out = natural_gas_consumed / heat_rate_mmbtu_per_mwh
 
-        outputs["electricity_out"] = electricity_out
-        outputs["natural_gas_consumed"] = natural_gas_consumed
-        outputs["electricity_headroom_out"] = (
-            np.minimum(  # we are limited by either
+        outputs["electricity_out"][simulation_range] = electricity_out
+        outputs["natural_gas_consumed"][simulation_range] = natural_gas_consumed
+        outputs["electricity_headroom_out"][simulation_range] = (
+            np.minimum(  # we are limitied by either
                 natural_gas_available
                 / heat_rate_mmbtu_per_mwh,  # the power available in the natural gas supply
                 available_capacity,  # or the available power of the system
@@ -206,14 +209,20 @@ class NaturalGasPerformanceModel(PerformanceModelBaseClass):
 
         outputs["rated_electricity_production"] = inputs["system_capacity"]
 
-        max_production = inputs["system_capacity"] * len(electricity_out) * (self.dt / 3600)
+        max_production = (
+            inputs["system_capacity"] * len(outputs["electricity_out"]) * (self.dt / 3600)
+        )
 
-        outputs["total_electricity_produced"] = np.sum(electricity_out) * (self.dt / 3600)
+        outputs["total_electricity_produced"] = np.sum(outputs["electricity_out"]) * (
+            self.dt / 3600
+        )
         outputs["capacity_factor"] = outputs["total_electricity_produced"].sum() / max_production
         outputs["annual_electricity_produced"] = outputs["total_electricity_produced"] * (
             1 / self.fraction_of_year_simulated
         )
-        outputs["unmet_electricity_demand"] = inputs["electricity_command_value"] - electricity_out
+        outputs["unmet_electricity_demand"][simulation_range] = (
+            inputs["electricity_command_value"][simulation_range] - electricity_out
+        )
 
 
 @define(kw_only=True)

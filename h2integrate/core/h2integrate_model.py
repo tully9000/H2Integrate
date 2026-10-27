@@ -129,6 +129,11 @@ class H2IntegrateModel:
         # and steppable simulation framework options.
         self.set_plant_solver()
 
+        # Ensure the plant group has the correct openmdao nonlinear solver
+        # considering system level control config options, system graph cycles,
+        # and steppable simulation framework options.
+        self.set_plant_solver()
+
         # create driver model
         # might be an analysis or optimization
         self.create_driver_model()
@@ -480,6 +485,27 @@ class H2IntegrateModel:
 
         # Create the plant model group and add components
         self.plant = self.model.add_subsystem("plant", plant_group, promotes=["*"])
+
+        # # Identify whether concurrent simulation framework is required
+        # if n_timesteps_window := self.plant_config["plant"]["simulation"].get(
+        #     "n_timesteps_window", False
+        # ):
+        #     n_timesteps = self.plant_config["plant"]["simulation"]["n_timesteps"]
+
+        #     if n_timesteps_window != n_timesteps:
+        #         if n_timesteps_window > n_timesteps:
+        #             raise AssertionError("n_timesteps_window cannot be greater than n_timesteps")
+
+        #         if n_timesteps % n_timesteps_window != 0:
+        #             raise AssertionError("n_timesteps must be divisible by n_timesteps_window")
+
+        #         # Assign custom nonlinear solver to plant group to manage concurrent simulation
+        #         self.plant.nonlinear_solver = ConcurrentPlantNLBGSSolver(
+        #             plant_config=self.plant_config
+        #         )
+        #         # self.plant.nonlinear_solver = ConcurrentPlantNLSolver(
+        #         #     plant_config=self.plant_config
+        #         # )
 
     def _classify_slc_technologies(self):
         """Classify technologies for system-level control.
@@ -1103,6 +1129,61 @@ class H2IntegrateModel:
 
         return om_model_object
 
+    def _check_time_step(self, model_name, model_object):
+        dt = int(self.plant_config["plant"]["simulation"]["dt"])
+
+        min_ts = model_object._time_step_bounds[0]
+        max_ts = model_object._time_step_bounds[1]
+        if dt < min_ts or dt > max_ts:
+            msg = (
+                f"Model {model_name} is compatible with time steps "
+                f"between {min_ts} (s) and {max_ts} (s), but a time step of {dt} (s) "
+                "was specified. Please set plant_config['plant']['simulation']['dt'] to a"
+                f" value within the range [{min_ts}, {max_ts}]."
+            )
+            raise ValueError(msg)
+
+    def _check_control_classifier(self, model_name, model_object):
+        if not self.slc:
+            return
+        if not hasattr(model_object, "_control_classifier"):
+            msg = f"Model {model_name} is missing a control classifier"
+            raise ValueError(msg)
+
+    def _check_steppable_models(self):
+        error_msg_list = []
+
+        non_steppable_control_strategies = [
+            cs.__str__()
+            for cs in self.control_strategies
+            if ((not hasattr(cs, "_is_steppable")) or (not cs._is_steppable))
+        ]
+        if non_steppable_control_strategies:
+            control_msg = (
+                f"Control strategy(ies): {sorted(non_steppable_control_strategies)} are not flagged"
+                " as capable of steppable simulation."
+            )
+            error_msg_list.append(control_msg)
+
+        non_steppable_performance_models = [
+            pm.__str__()
+            for pm in self.performance_models
+            if ((not hasattr(pm, "_is_steppable")) or (not pm._is_steppable))
+        ]
+        if non_steppable_performance_models:
+            performance_msg = (
+                f"Performance model(s): {sorted(non_steppable_performance_models)} are not flagged"
+                " as capable of steppable simulation."
+            )
+            error_msg_list.append(performance_msg)
+
+        if error_msg_list:
+            error_msg = (
+                "Attempting to run a steppable simulation with unsupported models:\n\t"
+                + "\n\t".join(error_msg_list)
+            )
+            raise AttributeError(error_msg)
+
     def _add_passthrough_controller(self, tech_group, perf_comp, individual_tech_config):
         """Automatically add a PassthroughController to a tech group if appropriate.
 
@@ -1156,9 +1237,13 @@ class H2IntegrateModel:
         # Build the controller sized to the plant's simulation horizon so its
         # vector I/O matches the performance model's time-series I/O.
         n_timesteps = int(self.plant_config["plant"]["simulation"]["n_timesteps"])
+        n_timesteps_window = int(
+            self.plant_config["plant"]["simulation"].get("n_timesteps_window", n_timesteps)
+        )
         controller = PassthroughController(
             commodity=commodity,
             n_timesteps=n_timesteps,
+            n_timesteps_window=n_timesteps_window,
             commodity_rate_units=commodity_rate_units,
         )
 

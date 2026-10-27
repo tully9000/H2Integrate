@@ -234,6 +234,9 @@ class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
         # Flag to avoid unnecessary re-calculation of PySAM model
         self._PYSAM_model_has_been_executed = False
 
+        # Flag to avoid unnecessary re-calculation of PySAM model
+        self._PYSAM_model_has_been_executed = False
+
         if self.config.tilt_angle_setting == "input":
             tilt = self.get_initial_angle_value("tilt", system_model)
             self.add_input(
@@ -485,7 +488,7 @@ class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
             outputs["capacity_factor"] = outputs["total_electricity_produced"] / max_production
 
         # Apply curtailment based on set_point
-        self.apply_curtailment(outputs)
+        self.apply_curtailment(inputs, outputs)
 
     def compute(self, inputs, outputs, discrete_inputs, discrete_outputs):
         if inputs["system_capacity_DC"][0] <= 0:
@@ -495,7 +498,7 @@ class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
             outputs["total_electricity_produced"] = 0.0
             outputs["annual_electricity_produced"] = 0.0
             outputs["capacity_factor"] = 0.0
-            self.apply_curtailment(outputs)
+            self.apply_curtailment(inputs, outputs)
             return
 
         simulation_range = self._get_compute_time_range(inputs["timestep_index"])
@@ -549,6 +552,8 @@ class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
 
             # run the model
             self.system_model.execute(0)
+
+            outputs["uncurtailed_electricity_out"] = self.system_model.Outputs.gen
 
             self._PYSAM_model_has_been_executed = True
 

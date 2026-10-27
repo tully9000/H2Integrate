@@ -287,7 +287,10 @@ class StoragePerformanceBase(PerformanceModelBaseClass):
                 "storage_capacity": storage_capacity,
                 "commodity_available": inputs[f"{self.commodity}_in"],
             }
-            storage_commodity_out, soc = dispatch(self.simulate, kwargs, inputs)
+            storage_commodity_out, soc = dispatch(
+                self.simulate, kwargs, inputs, deepcopy(self._soc_timeseries)
+            )
+            self._soc_timeseries[simulation_range] = soc
 
         else:
             storage_commodity_out, soc = self.simulate(
