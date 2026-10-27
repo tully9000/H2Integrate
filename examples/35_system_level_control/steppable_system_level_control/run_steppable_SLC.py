@@ -1,4 +1,3 @@
-import sys
 import time
 import pprint
 from copy import deepcopy
@@ -9,16 +8,18 @@ import matplotlib.pyplot as plt
 
 from h2integrate import H2IntegrateModel, load_tech_yaml, load_plant_yaml, load_driver_yaml
 from h2integrate.core.dict_utils import percent_diff_dicts, find_nonzero_percent_diffs
-from h2integrate.core.concurrent_nl_solver import ConcurrentPlantNLBGSSolver
 
 
-sys.path.append(str(Path(__file__).resolve().parents[1]))
-from comparison_tools import Profiler
+# from h2integrate.core.concurrent_nl_solver import ConcurrentPlantNLBGSSolver
+
+
+# sys.path.append(str(Path(__file__).resolve().parents[1]))
+# from comparison_tools import Profiler
 
 
 # Run one of both simulation paradigms by changing the flags in this dict
 run_dict = {
-    "run_sequential": True,
+    # "run_sequential": True,
     "run_concurrent": True,
     # "run_sequential_opt": True,
     # "run_concurrent_opt": True,
@@ -27,7 +28,7 @@ run_dict = {
 
 # Load config files into dict
 config_root = Path(__file__).parent
-config_path = config_root / "wind_ng_demand.yaml"
+config_path = config_root / "config.yaml"
 
 # Load top level config
 with Path(config_path).open() as f:
@@ -90,15 +91,13 @@ if run_dict.get("run_concurrent", False):
     # Create an H2I model for steppable simulation
     h2i_con = H2IntegrateModel(config_con)
 
-    h2i_con.plant.nonlinear_solver = ConcurrentPlantNLBGSSolver(h2i_con.plant_config)
-    h2i_con.plant.nonlinear_solver.options["iprint"] = 0
+    # h2i_con.plant.nonlinear_solver = ConcurrentPlantNLBGSSolver(h2i_con.plant_config)
+    # h2i_con.plant.nonlinear_solver.options["iprint"] = 0
 
     t0 = time.time()
     # Run the model
 
-    pf = Profiler(run_profile=False)
-    with pf:
-        h2i_con.run()
+    h2i_con.run()
 
     t1 = time.time()
 
@@ -149,6 +148,8 @@ if run_dict.get("run_sequential", False) and run_dict.get("run_concurrent", Fals
 
     pprint.pprint(in_abs)
     pprint.pprint(out_abs)
+
+    print()
 
 
 if run_dict.get("run_sequential_opt", False) or run_dict.get("run_concurrent_opt", False):
@@ -208,8 +209,8 @@ if run_dict.get("run_concurrent_opt", False):
     # Create an H2I model for steppable simulation
     h2i_con = H2IntegrateModel(config_con)
 
-    h2i_con.plant.nonlinear_solver = ConcurrentPlantNLBGSSolver(h2i_con.plant_config)
-    h2i_con.plant.nonlinear_solver.options["iprint"] = 0
+    # h2i_con.plant.nonlinear_solver = ConcurrentPlantNLBGSSolver(h2i_con.plant_config)
+    # h2i_con.plant.nonlinear_solver.options["iprint"] = 0
 
     # Run the model
     h2i_con.run()
