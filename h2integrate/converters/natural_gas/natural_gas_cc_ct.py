@@ -64,6 +64,8 @@ class NaturalGasPerformanceModel(PerformanceModelBaseClass):
     )  # (min, max) time step lengths (in seconds) compatible with this model
     _control_classifier = "dispatchable"
 
+    _is_steppable = True
+
     def initialize(self):
         super().initialize()
         self.commodity = "electricity"
