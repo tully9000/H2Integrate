@@ -500,10 +500,8 @@ class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
 
         simulation_range = self._get_compute_time_range(inputs["timestep_index"])
 
-        if not self._PYSAM_model_has_been_executed:
-            assert simulation_range.start == 0, (
-                "PYSAM model should only be executed at the start of the simulation"
-            )
+        if (not self._PYSAM_model_has_been_executed) and (simulation_range.start == 0):
+            # PYSAM model setup and execution should only be done at the start of the simulation.
 
             if self.config.create_model_from == "default":
                 self.system_model = Pvwatts.default(self.config.config_name)

@@ -1,9 +1,9 @@
 import numpy as np
 from openmdao.recorders.recording_iteration_stack import Recording
-from openmdao.solvers.nonlinear.nonlinear_runonce import NonlinearRunOnce
+from openmdao.solvers.nonlinear.nonlinear_block_gs import NonlinearBlockGS
 
 
-class TimeMarchingPlantSolver(NonlinearRunOnce):
+class TimeMarchingPlantSolver(NonlinearBlockGS):
     """
     Custom nonlinear solver to manage running the plant group in a loop.
 
@@ -12,6 +12,10 @@ class TimeMarchingPlantSolver(NonlinearRunOnce):
     def __init__(self, plant_config):
         super().__init__()
         self.plant_config = plant_config
+        # iprint is hardcoded to 0 for now to suppress excessive printouts from every time marching
+        # step.
+        # TODO Set allow the use solver options from config files?
+        self.options["iprint"] = 0
 
     def solve(self):
         # Should only be used when system is the plant group
@@ -56,13 +60,13 @@ class TimeMarchingPlantSolver(NonlinearRunOnce):
                         for s in skippable_subsystems:
                             s.options["skip_compute"] = False
 
-                try:
-                    self._solve()
+                    try:
+                        self._solve()
 
-                except Exception as err:
-                    if self.options["debug_print"]:
-                        self._print_exc_debug_info()
-                    raise err
+                    except Exception as err:
+                        if self.options["debug_print"]:
+                            self._print_exc_debug_info()
+                        raise err
 
         finally:
             # A failed step must not leave cost and finance models skipped on the next run.
