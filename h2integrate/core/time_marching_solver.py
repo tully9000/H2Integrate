@@ -44,7 +44,7 @@ class TimeMarchingPlantSolver(NonlinearRunOnce):
             s.options["skip_compute"] = True
 
         try:
-            with Recording("NLRunOnce", 0, self) as rec:
+            with Recording("NLRunOnce", 0, self):
                 for ss in sim_starts:
                     # Update timestep_index in all subsystems
                     for tk in timestep_keys:
@@ -56,11 +56,19 @@ class TimeMarchingPlantSolver(NonlinearRunOnce):
                         for s in skippable_subsystems:
                             s.options["skip_compute"] = False
 
-                    # Run one GS iteration on the plant group
-                    self._gs_iter()
+                try:
+                    self._solve()
 
-                rec.abs = 0.0
-                rec.rel = 0.0
+                except Exception as err:
+                    if self.options["debug_print"]:
+                        self._print_exc_debug_info()
+                    raise err
+
+                #     # Run one GS iteration on the plant group
+                #     self._gs_iter()
+
+                # rec.abs = 0.0
+                # rec.rel = 0.0
         finally:
             # A failed step must not leave cost and finance models skipped on the next run.
             for s in skippable_subsystems:
