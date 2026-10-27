@@ -64,11 +64,6 @@ class TimeMarchingPlantSolver(NonlinearRunOnce):
                         self._print_exc_debug_info()
                     raise err
 
-                #     # Run one GS iteration on the plant group
-                #     self._gs_iter()
-
-                # rec.abs = 0.0
-                # rec.rel = 0.0
         finally:
             # A failed step must not leave cost and finance models skipped on the next run.
             for s in skippable_subsystems:
