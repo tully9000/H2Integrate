@@ -485,7 +485,7 @@ class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
             outputs["capacity_factor"] = outputs["total_electricity_produced"] / max_production
 
         # Apply curtailment based on set_point
-        self.apply_curtailment(outputs)
+        self.apply_curtailment(inputs, outputs)
 
     def compute(self, inputs, outputs, discrete_inputs, discrete_outputs):
         if inputs["system_capacity_DC"][0] <= 0:
@@ -495,7 +495,7 @@ class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
             outputs["total_electricity_produced"] = 0.0
             outputs["annual_electricity_produced"] = 0.0
             outputs["capacity_factor"] = 0.0
-            self.apply_curtailment(outputs)
+            self.apply_curtailment(inputs, outputs)
             return
 
         simulation_range = self._get_compute_time_range(inputs["timestep_index"])

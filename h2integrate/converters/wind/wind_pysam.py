@@ -457,53 +457,6 @@ class PYSAMWindPlantPerformanceModel(WindPerformanceBaseClass):
 
         return success
 
-    def _compute_outputs(self, inputs, outputs):
-        simulation_range = self._get_compute_time_range(inputs["timestep_index"])
-
-        # outputs["electricity_out"][simulation_range] = self.system_model.Outputs.gen[
-        #     simulation_range.start : simulation_range.stop
-        # ]
-        # outputs["rated_electricity_production"] = self.system_model.Farm.system_capacity
-
-        # outputs["total_capacity"] = self.system_model.Farm.system_capacity
-        # outputs["annual_energy"] = self.system_model.Outputs.annual_energy
-
-        # Use this calculation for total_electricity_produced for LCOE to
-        # reflect total electricity generated
-        outputs["total_electricity_produced"] = outputs["uncurtailed_electricity_out"].sum() * (
-            self.dt / 3600
-        )
-
-        # outputs["annual_electricity_produced"] = self.system_model.Outputs.annual_energy
-        # max_production = (
-        # self.n_timesteps * outputs["rated_electricity_production"] * (self.dt / 3600)
-        # )
-        # outputs["capacity_factor"] = outputs["total_electricity_produced"] / max_production
-
-        # Apply curtailment based on set_point
-        # self.apply_curtailment(inputs, outputs)
-
-        # ====================================== OLD ^^^^ ================================
-        # time_step_hours = self.dt / 3600
-        outputs["electricity_out"][simulation_range] = self.generation[: self.n_timesteps][
-            simulation_range
-        ]
-
-        # if use_lifetime_output:
-
-        #     outputs["annual_electricity_produced"] = annual_energy
-        #     outputs["capacity_factor"] = annual_energy / self.max_production
-        # else:
-        #     outputs["annual_electricity_produced"] = self.system_model.Outputs.annual_energy
-
-        # outputs["total_electricity_produced"] = outputs["electricity_out"].sum() * time_step_hours
-
-        if not self.use_lifetime_output:
-            outputs["capacity_factor"] = outputs["total_electricity_produced"] / self.max_production
-
-        # Apply curtailment based on set_point
-        self.apply_curtailment(outputs)
-
     def compute(self, inputs, outputs, discrete_inputs, discrete_outputs):
         rotor_diameter = inputs["rotor_diameter"][0]
         turbine_rating_kw = inputs["wind_turbine_rating"][0]
@@ -515,7 +468,7 @@ class PYSAMWindPlantPerformanceModel(WindPerformanceBaseClass):
             outputs["total_electricity_produced"] = 0.0
             outputs["annual_electricity_produced"] = 0.0
             outputs["capacity_factor"] = 0.0
-            self.apply_curtailment(outputs)
+            self.apply_curtailment(inputs, outputs)
             return
 
         simulation_range = self._get_compute_time_range(inputs["timestep_index"])
@@ -581,6 +534,7 @@ class PYSAMWindPlantPerformanceModel(WindPerformanceBaseClass):
 
             self.system_model = system_model
 
+            outputs["uncurtailed_electricity_out"] = self.system_model.Outputs.gen
             outputs["rated_electricity_production"] = self.system_model.Farm.system_capacity
 
             time_step_hours = self.dt / 3600
@@ -628,7 +582,21 @@ class PYSAMWindPlantPerformanceModel(WindPerformanceBaseClass):
         if simulation_range.stop >= self.n_timesteps:
             self._PYSAM_model_has_been_executed = False
 
-        self._compute_outputs(inputs, outputs)
+        # Use this calculation for total_electricity_produced for LCOE to
+        # reflect total electricity generated
+        outputs["total_electricity_produced"] = outputs["uncurtailed_electricity_out"].sum() * (
+            self.dt / 3600
+        )
+
+        outputs["electricity_out"][simulation_range] = self.generation[: self.n_timesteps][
+            simulation_range
+        ]
+
+        if not self.use_lifetime_output:
+            outputs["capacity_factor"] = outputs["total_electricity_produced"] / self.max_production
+
+        # Apply curtailment based on set_point
+        self.apply_curtailment(inputs, outputs)
 
     def post_process(self, show_plots=False):
         def plot_turbine_points(
