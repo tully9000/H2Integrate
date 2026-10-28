@@ -63,6 +63,7 @@ class NaturalGasPerformanceModel(PerformanceModelBaseClass):
         3600,
     )  # (min, max) time step lengths (in seconds) compatible with this model
     _control_classifier = "dispatchable"
+    _is_steppable = True
 
     def initialize(self):
         super().initialize()
@@ -164,6 +165,8 @@ class NaturalGasPerformanceModel(PerformanceModelBaseClass):
                 and unmet_electricity_demand.
         """
 
+        simulation_range = self._get_compute_time_range(inputs["timestep_index"])
+
         # calculate max input and output
         system_capacity = inputs["system_capacity"]  # plant capacity in MW
         heat_rate_mmbtu_per_mwh = inputs["heat_rate_mmbtu_per_mwh"]
@@ -176,15 +179,15 @@ class NaturalGasPerformanceModel(PerformanceModelBaseClass):
 
         # electrical command value, saturated at the available system capacity
         electricity_command_value = np.minimum(
-            inputs["electricity_command_value"], available_capacity
+            inputs["electricity_command_value"][simulation_range], available_capacity
         )
         natural_gas_demand = electricity_command_value * heat_rate_mmbtu_per_mwh
 
         # available feedstock, saturated at maximum system feedstock consumption
         natural_gas_available = np.where(
-            inputs["natural_gas_in"] > max_natural_gas_consumption,
+            inputs["natural_gas_in"][simulation_range] > max_natural_gas_consumption,
             max_natural_gas_consumption,
-            inputs["natural_gas_in"],
+            inputs["natural_gas_in"][simulation_range],
         )
 
         # natural gas consumed is minimum between available feedstock and output demand
@@ -193,10 +196,10 @@ class NaturalGasPerformanceModel(PerformanceModelBaseClass):
         # Convert natural gas consumption to electricity output using heat rate
         electricity_out = natural_gas_consumed / heat_rate_mmbtu_per_mwh
 
-        outputs["electricity_out"] = electricity_out
-        outputs["natural_gas_consumed"] = natural_gas_consumed
-        outputs["electricity_headroom_out"] = (
-            np.minimum(  # we are limited by either
+        outputs["electricity_out"][simulation_range] = electricity_out
+        outputs["natural_gas_consumed"][simulation_range] = natural_gas_consumed
+        outputs["electricity_headroom_out"][simulation_range] = (
+            np.minimum(  # we are limitied by either
                 natural_gas_available
                 / heat_rate_mmbtu_per_mwh,  # the power available in the natural gas supply
                 available_capacity,  # or the available power of the system
@@ -206,14 +209,92 @@ class NaturalGasPerformanceModel(PerformanceModelBaseClass):
 
         outputs["rated_electricity_production"] = inputs["system_capacity"]
 
-        max_production = inputs["system_capacity"] * len(electricity_out) * (self.dt / 3600)
+        max_production = (
+            inputs["system_capacity"] * len(outputs["electricity_out"]) * (self.dt / 3600)
+        )
 
-        outputs["total_electricity_produced"] = np.sum(electricity_out) * (self.dt / 3600)
+        outputs["total_electricity_produced"] = np.sum(outputs["electricity_out"]) * (
+            self.dt / 3600
+        )
         outputs["capacity_factor"] = outputs["total_electricity_produced"].sum() / max_production
         outputs["annual_electricity_produced"] = outputs["total_electricity_produced"] * (
             1 / self.fraction_of_year_simulated
         )
-        outputs["unmet_electricity_demand"] = inputs["electricity_command_value"] - electricity_out
+        outputs["unmet_electricity_demand"][simulation_range] = (
+            inputs["electricity_command_value"][simulation_range] - electricity_out
+        )
+
+        if simulation_range.start < 24:
+            import matplotlib.pyplot as plt
+
+            fig_label = f"NGCT_{simulation_range.start}"
+
+            preexisting_fig = False
+
+            open_fig_labels = plt.get_figlabels()
+            if fig_label in open_fig_labels:
+                fig = plt.figure(fig_label)
+                ax = fig.get_axes()
+                preexisting_fig = True
+            else:
+                fig, ax = plt.subplots(2, 1, sharex="all", layout="constrained")
+                ax = np.ravel(ax)
+                fig.suptitle(f"{simulation_range.start}")
+                fig.set_label(fig_label)
+
+            kw = {"alpha": 1}
+            if self.n_timesteps_window == 8760:
+                kw["color"] = "blue"
+                kw["linewidth"] = 3
+            else:
+                kw["color"] = "orange"
+
+            prev_data = [None for i in range(len(ax))]
+
+            if preexisting_fig:
+                for i, axs in enumerate(ax):
+                    for ln in axs.lines:
+                        if self.n_timesteps_window == 8760:
+                            if ln.get_color() == "blue":
+                                ln.set_alpha(0.25)
+                            else:
+                                continue
+                        else:
+                            if ln.get_color() == "orange":
+                                ln.set_alpha(0.25)
+                            else:
+                                if (ln.get_color() == "blue") and (ln.get_alpha() == 1):
+                                    prev_data[i] = ln.get_data()[1]
+                                continue
+
+            def plot_data(ax, data, name, kw, prev_data):
+                if prev_data is not None:
+                    data_diff = data - prev_data
+                    np.where(np.abs(data_diff) > 1e-6)[0]
+
+                    # # ax.scatter(diff_inds, np.ones(len(diff_inds)))
+                    # for j in range(len(diff_inds)):
+                    #     ax.axvline(diff_inds[j], alpha=0.5, color="gray", zorder=0.1)
+
+                ax.plot(data, **kw)
+                ax.set_title(name)
+
+            plot_data(
+                ax[0],
+                inputs["electricity_command_value"],
+                name="NG set point",
+                kw=kw,
+                prev_data=prev_data[0],
+            )
+            plot_data(
+                ax[1],
+                outputs["electricity_out"],
+                name="Electricity out",
+                kw=kw,
+                prev_data=prev_data[1],
+            )
+
+            ax[0].set_xlim([simulation_range.start, simulation_range.stop])
 
 
 @define(kw_only=True)
