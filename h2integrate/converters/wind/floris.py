@@ -23,6 +23,8 @@ from h2integrate.converters.wind.layout.simple_grid_layout import (
 class FlorisWindPlantPerformanceModelConfig(CacheBaseConfig):
     """Configuration class for FlorisWindPlantPerformanceModel.
 
+    See :class:`FlorisWindPlantPerformanceModel` and :doc:`/technology_models/floris_wind_plant`.
+
     Attributes:
         num_turbines (int): number of turbines in farm
         floris_wake_config (dict): dictionary containing FLORIS inputs for flow_field, wake,
@@ -104,6 +106,9 @@ class FlorisWindPlantPerformanceModel(WindPerformanceBaseClass, CacheBaseClass):
     An OpenMDAO component that wraps a Floris model.
     It takes wind turbine model parameters and wind resource data as input and
     outputs power generation data.
+
+    See :class:`FlorisWindPlantPerformanceModelConfig` and
+    :doc:`/technology_models/floris_wind_plant`.
     """
 
     _time_step_bounds = (
@@ -288,7 +293,7 @@ class FlorisWindPlantPerformanceModel(WindPerformanceBaseClass, CacheBaseClass):
         )
 
         # Apply curtailment based on set_point
-        self.apply_curtailment(outputs)
+        self.apply_curtailment(inputs, outputs)
 
         # 3. Cache the results for future use if enabled
         self.cache_outputs(

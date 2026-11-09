@@ -58,6 +58,34 @@ automatically and generate the model's input template. If a model intentionally
 shares a base config or requires a specialized config name, document that
 relationship and ensure the model's own setup path remains unambiguous.
 
+### Documenting a model
+
+Add a user guide page for the model, link it from the table of contents, and link from it to
+each relevant model and configuration API entry using `{py:class}`. Embed configuration class
+documentation with an `autoclass` directive, `:no-index:`, and `:no-members:` rather than
+maintaining a separate list of configuration fields and defaults in the guide. The last option
+overrides the book's default member discovery, which would otherwise repeat attrs fields or
+include undocumented members. For pages covering many models, a table linking each model and
+configuration can be more useful than embedding every configuration. Link to model APIs rather
+than embedding their methods unless specific methods are useful in the guide.
+
+Document configuration fields in the configuration docstring. For inherited constructor
+parameters, link to or embed the base configuration so readers can find their descriptions
+without duplicating them. Use Python cross-reference roles such as `:class:` and `:attr:` in
+docstrings, or double backticks for literal identifiers; in MyST pages use `{py:class}` and
+`{py:attr}` or inline code.
+If a directive intentionally includes members, `:inherited-members: BaseClass` excludes members
+inherited from the named base; use `:no-undoc-members:` to override the book's default or
+`:exclude-members:` for specific duplicate fields. Check the rendered output and follow links in
+both directions.
+
+Explain the model's capabilities and limitations, usage, OpenMDAO inputs and outputs (including
+units and inherited variables), and any supported time-step or control restrictions. Distinguish
+configuration values from similarly named OpenMDAO inputs if the model uses them differently.
+Add reciprocal `:class:` and `:doc:` links to the model and configuration docstrings so API
+readers can find the related reference and guide. See the
+[reverse osmosis guide](../technology_models/desalination.md) for an example.
+
 ```{note}
 `setup` is where the configuration object is built and where any additional I/O is registered. Always call `super().setup()` first so that the baseclass can register the standard production outputs (and, for flexible models, the command-value input). The `compute` signature is
 `compute(self, inputs, outputs, discrete_inputs, discrete_outputs)` because performance models may use discrete I/O (e.g. resource data dictionaries).
@@ -147,7 +175,7 @@ Performance models must also define the following class attributes:
 - `commodity` (str), `commodity_rate_units` (str), `commodity_amount_units` (str): set in `initialize()` (or before calling `super().setup()`). These define the commodity produced by the model and the units used for its rate (e.g. `"kW"`, `"kg/h"`) and cumulative amount (e.g. `"kW*h"`, `"kg"`). `PerformanceModelBaseClass.setup()` uses them to register all of the standard outputs and will raise `NotImplementedError` if any are missing.
 - `_control_classifier` (str): How the system-level controller (SLC) should treat this model. One of `"fixed"`, `"flexible"`, `"dispatchable"`, `"storage"`, or `"feedstock"`. The classifier determines whether the SLC sends a set-point to the model and how its output is folded into the dispatch logic. See the [control classifier docs](../control/system_level_control/control_classifier.md) for details.
 
-For `flexible` models specifically, the baseclass automatically registers the `{commodity}_command_value` input and `uncurtailed_{commodity}_out` output, and the `compute()` method must call `self.apply_curtailment(outputs)` after writing the raw production to `outputs[f"{commodity}_out"]`. For `dispatchable` models the command value is consumed by the model's own internal logic; no curtailment helper is needed. `fixed` and `feedstock` models do not receive a command value at all.
+For `flexible` models specifically, the baseclass automatically registers the `{commodity}_command_value` input and `uncurtailed_{commodity}_out` output, and the `compute()` method must call `self.apply_curtailment(inputs, outputs)` after writing the raw production to `outputs[f"{commodity}_out"]`. For `dispatchable` models the command value is consumed by the model's own internal logic; no curtailment helper is needed. `fixed` and `feedstock` models do not receive a command value at all.
 
 (adding_io)=
 ### Adding additional inputs or outputs
