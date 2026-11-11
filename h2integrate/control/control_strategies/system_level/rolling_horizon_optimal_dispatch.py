@@ -1,7 +1,19 @@
 import numpy as np
+import warnings
 from attrs import field, define
 import openmdao.api as om
-from scipy.optimize import minimize
+from pyomo.environ import (
+    ConcreteModel,
+    Set,
+    Var,
+    Constraint,
+    Objective,
+    NonNegativeReals,
+    minimize,
+    SolverFactory,
+    SolverStatus,
+    value,
+)
 
 from h2integrate.core.utilities import BaseConfig
 from h2integrate.core.supported_models import register
@@ -119,6 +131,10 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
                 desc=f"Sell price per unit of {self.commodity}",
             )
 
+        # Phase D: Initialize window state tracking for SOC continuity
+        self.last_soc_per_tech = {}  # {storage_tech: soc_value}
+        self.last_output_per_tech = {}  # {dispatchable_tech: output_value}
+
     def compute(self, inputs, outputs):
         """Solve rolling horizon optimization and extract first-window dispatch.
 
@@ -154,9 +170,13 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
         self._extract_and_output_dispatch(dispatch_decisions, window_start, simulation_range, outputs)
 
     def _solve_optimization(self, inputs, window_start, window_end, window_length):
-        """Solve optimization using scipy for Phase A (demand-following).
+        """Solve optimization using Pyomo + external solver (Phase D).
 
-        Phase A uses scipy.optimize.minimize for simplicity; Phase B+ will migrate to Pyomo.
+        Builds a ConcreteModel with:
+        - Dispatchable tech outputs: output[t, tech]
+        - Storage SOC dynamics: soc[t, storage], charge[t, storage], discharge[t, storage]
+        - Ramping constraints (optional)
+        - Energy balance constraint
 
         Args:
             inputs: OpenMDAO inputs dict
@@ -168,27 +188,26 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
             tuple: (model, dispatch_decisions) where dispatch_decisions maps
                 tech_name -> array of optimal outputs for window
         """
-        # Extract demand and tech data for this window
+        # Extract window data
         demand_window = inputs[self.demand_input_name][window_start:window_end]
+        dt_hours = self.options["plant_config"]["plant"]["simulation"]["dt"] / 3600
 
-        # Pre-compute fixed and flexible production for each timestep
+        # Pre-compute fixed and flexible production
         fixed_production = np.zeros(window_length)
         flexible_production = np.zeros(window_length)
 
         for tau in range(window_length):
             abs_tau = window_start + tau
-
             for fixed_tech in self.fixed_techs:
                 in_name = f"{fixed_tech}_{self.commodity}_out"
                 if in_name in inputs:
                     fixed_production[tau] += inputs[in_name][abs_tau]
-
             for flexible_tech in self.flexible_techs:
                 rated_name = f"{flexible_tech}_rated_{self.commodity}_production"
                 if rated_name in inputs:
                     flexible_production[tau] += inputs[rated_name]
 
-        # Get capacity bounds for dispatchable and storage techs
+        # Get capacity bounds
         dispatchable_capacities = []
         for i, tech in enumerate(self.dispatchable_techs):
             rated_name = self.dispatchable_rated_names[i]
@@ -197,213 +216,289 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
                 cap_val = cap_val.item()
             dispatchable_capacities.append(cap_val)
 
-        # Compute marginal costs early (needed for both initial guess and objective)
+        # Get storage capacities and efficiencies
+        storage_capacities = {}
+        storage_charge_efficiencies = {}
+        storage_discharge_efficiencies = {}
+        storage_min_soc_frac = {}
+        storage_max_soc_frac = {}
+        storage_max_charge_rate = {}
+        storage_max_discharge_rate = {}
+
+        for storage_tech in self.storage_techs:
+            # Try to get tech config from plant_config["technologies"], or use defaults
+            tech_config_dict = {}
+            try:
+                plant_cfg = self.options["plant_config"]
+                if isinstance(plant_cfg, dict) and "technologies" in plant_cfg:
+                    tech_config_dict = plant_cfg["technologies"].get(storage_tech, {})
+            except:
+                pass
+
+            if not tech_config_dict:
+                try:
+                    tech_cfg = self.options["tech_config"]
+                    if isinstance(tech_cfg, dict):
+                        tech_config_dict = tech_cfg.get(storage_tech, {})
+                except:
+                    pass
+
+            model_inputs = tech_config_dict.get("model_inputs", {})
+            shared = model_inputs.get("shared_parameters", {})
+
+            # Use defaults if config not found
+            capacity = shared.get("max_capacity", 100000)  # kWh, default 100 MWh
+            storage_capacities[storage_tech] = capacity
+
+            # Efficiencies
+            perf = model_inputs.get("performance_parameters", {})
+            rte = perf.get("round_trip_efficiency", 0.9)
+            eff_c = np.sqrt(rte)  # Sqrt split
+            eff_d = np.sqrt(rte)
+            storage_charge_efficiencies[storage_tech] = eff_c
+            storage_discharge_efficiencies[storage_tech] = eff_d
+
+            # SOC bounds
+            storage_min_soc_frac[storage_tech] = shared.get("min_soc_fraction", 0.0)
+            storage_max_soc_frac[storage_tech] = shared.get("max_soc_fraction", 1.0)
+
+            # Charge/discharge limits
+            storage_max_charge_rate[storage_tech] = shared.get("max_charge_rate", 1e6)  # kW
+            storage_max_discharge_rate[storage_tech] = shared.get("max_discharge_rate", 1e6)  # kW
+
+        # Compute marginal costs
         marginal_costs = self._compute_marginal_costs(inputs) if self.config.objective_function in ("cost_minimization", "profit_maximization") else []
 
-        # Decision variables: [disp_tech_1_t1, disp_tech_1_t2, ..., storage_tech_1_t1, ...]
-        n_disp_vars = len(self.dispatchable_techs) * window_length
-        n_storage_vars = len(self.storage_techs) * window_length
-        n_vars = n_disp_vars + n_storage_vars
+        # Build Pyomo model
+        model = ConcreteModel()
+        model.t = Set(initialize=range(window_length))
 
-        # Initial guess: try to meet demand with dispatchable techs, preferring cheaper ones if available
-        x0 = np.zeros(n_vars)
+        # Dispatchable output variables
+        model.output = Var(model.t, range(len(self.dispatchable_techs)), within=NonNegativeReals)
 
-        # For profit maximization, start with zero dispatch (only dispatch if profitable)
-        if self.config.objective_function == "profit_maximization":
-            # Initial guess: zero dispatch
-            x0 = np.zeros(n_vars)
+        # Storage variables
+        model.soc = Var(model.t, range(len(self.storage_techs)), within=NonNegativeReals)
+        model.charge = Var(model.t, range(len(self.storage_techs)), within=NonNegativeReals)
+        model.discharge = Var(model.t, range(len(self.storage_techs)), within=NonNegativeReals)
 
-        # For cost minimization, sort techs by cost and dispatch in order
-        elif self.config.objective_function == "cost_minimization" and marginal_costs:
-            # Get mean cost per tech and sort
-            mean_costs = [marginal_costs[i].mean() for i in range(len(self.dispatchable_techs))]
-            cost_order = sorted(range(len(self.dispatchable_techs)), key=lambda i: mean_costs[i])
+        # Demand satisfaction slack (for soft constraints)
+        model.demand_satisfied = Var(model.t, within=NonNegativeReals)
 
-            for t in range(window_length):
-                remaining = demand_window[t] - fixed_production[t] - flexible_production[t]
-                # Dispatch in cost order
-                for idx in cost_order:
-                    if remaining <= 1e-6:
-                        break
-                    cap = dispatchable_capacities[idx]
-                    dispatch = min(remaining, cap)
-                    var_idx = idx * window_length + t
-                    x0[var_idx] = dispatch
-                    remaining -= dispatch
-        else:
-            # Default: split equally or zero
-            for t in range(window_length):
-                remaining = demand_window[t] - fixed_production[t] - flexible_production[t]
-                for i in range(len(self.dispatchable_techs)):
-                    var_idx = i * window_length + t
-                    if remaining > 0 and len(dispatchable_capacities) > i:
-                        x0[var_idx] = min(remaining / len(self.dispatchable_techs), dispatchable_capacities[i])
+        # Set initial bounds for dispatchable techs
+        for t in model.t:
+            for i, cap in enumerate(dispatchable_capacities):
+                model.output[t, i].setub(cap)
 
-        # Bounds: [0, capacity] for all variables
-        bounds = []
-        for i in range(len(self.dispatchable_techs)):
-            for t in range(window_length):
-                bounds.append((0, dispatchable_capacities[i]))
-        for i in range(len(self.storage_techs)):
-            for t in range(window_length):
-                bounds.append((-1e6, 1e6))  # Storage can charge/discharge freely
+        # Set SOC bounds and charge/discharge limits
+        for t in model.t:
+            for i, storage_tech in enumerate(self.storage_techs):
+                cap = storage_capacities[storage_tech]
+                model.soc[t, i].setub(cap * storage_max_soc_frac[storage_tech])
+                model.soc[t, i].setlb(cap * storage_min_soc_frac[storage_tech])
+                model.charge[t, i].setub(storage_max_charge_rate[storage_tech] * dt_hours)
+                model.discharge[t, i].setub(storage_max_discharge_rate[storage_tech] * dt_hours)
 
-        # Objective function depends on strategy
+        # Energy balance constraint
+        def energy_balance_rule(m, t):
+            # Total production = demand_satisfied + storage_net_change
+            disp_prod = sum(m.output[t, i] for i in range(len(self.dispatchable_techs)))
+            storage_net = sum(m.charge[t, i] - m.discharge[t, i] for i in range(len(self.storage_techs)))
+            return disp_prod + fixed_production[t] + flexible_production[t] == m.demand_satisfied[t] + storage_net
+        model.energy_balance = Constraint(model.t, rule=energy_balance_rule)
+
+        # Storage SOC dynamics
+        def soc_balance_rule(m, t, i):
+            storage_tech = self.storage_techs[i]
+            cap = storage_capacities[storage_tech]
+            eff_c = storage_charge_efficiencies[storage_tech]
+            eff_d = storage_discharge_efficiencies[storage_tech]
+
+            if t == 0:
+                prev_soc = self.last_soc_per_tech.get(storage_tech, 0.5 * cap)
+            else:
+                prev_soc = m.soc[t-1, i]
+
+            return m.soc[t, i] == prev_soc + (m.charge[t, i] * eff_c - m.discharge[t, i] / eff_d) * dt_hours / cap
+        model.soc_balance = Constraint(model.t, range(len(self.storage_techs)), rule=soc_balance_rule)
+
+        # Ramping constraints (optional)
+        if self.config.enable_ramping_constraints:
+            ramp_limits = self.config.ramp_rate_limits_pct_per_hour
+
+            def ramp_up_rule(m, t, i):
+                if t == 0:
+                    return Constraint.Skip
+                tech = self.dispatchable_techs[i]
+                ramp_pct = ramp_limits.get(tech, 100.0)  # Default 100% = no limit
+                ramp_mw_per_hour = (ramp_pct / 100.0) * dispatchable_capacities[i]
+                return m.output[t, i] - m.output[t-1, i] <= ramp_mw_per_hour * dt_hours
+            model.ramp_up = Constraint(model.t, range(len(self.dispatchable_techs)), rule=ramp_up_rule)
+
+            def ramp_down_rule(m, t, i):
+                if t == 0:
+                    return Constraint.Skip
+                tech = self.dispatchable_techs[i]
+                ramp_pct = ramp_limits.get(tech, 100.0)
+                ramp_mw_per_hour = (ramp_pct / 100.0) * dispatchable_capacities[i]
+                return m.output[t-1, i] - m.output[t, i] <= ramp_mw_per_hour * dt_hours
+            model.ramp_down = Constraint(model.t, range(len(self.dispatchable_techs)), rule=ramp_down_rule)
+
+        # Demand satisfaction constraints (hard or soft depending on mode)
+        if not self.config.enable_demand_shed:
+            # Hard constraint: must meet demand
+            def demand_rule(m, t):
+                return m.demand_satisfied[t] == demand_window[t]
+            model.demand_rule = Constraint(model.t, rule=demand_rule)
+
+        # Set objective function
         if self.config.objective_function == "demand_following":
-            def objective(x):
-                # Minimize sum of squared demand errors
-                total_error = 0.0
-                for t in range(window_length):
-                    # Total production this timestep
-                    disp_prod = sum(x[i * window_length + t] for i in range(len(self.dispatchable_techs)))
-                    storage_prod = sum(x[n_disp_vars + i * window_length + t] for i in range(len(self.storage_techs)))
-                    total_prod = disp_prod + storage_prod + fixed_production[t] + flexible_production[t]
-
-                    error = demand_window[t] - total_prod
-                    total_error += error ** 2
-
-                return total_error
+            def objective_expr(m):
+                return sum((demand_window[t] - m.demand_satisfied[t])**2 for t in m.t)
+            model.obj = Objective(expr=objective_expr, sense=minimize)
 
         elif self.config.objective_function == "cost_minimization":
-            def objective(x):
-                return self._build_cost_minimization_objective(
-                    demand_window, x, window_start, window_length,
-                    fixed_production, flexible_production, inputs
-                )
+            def objective_expr(m):
+                cost = 0.0
+                for t in m.t:
+                    abs_t = window_start + t
+                    for i, tech in enumerate(self.dispatchable_techs):
+                        mc = marginal_costs[i]
+                        cost += mc[abs_t] * m.output[t, i] * dt_hours
+
+                # Penalty for unmet demand (if soft)
+                if self.config.enable_demand_shed:
+                    demand_penalty = sum(1e6 * (demand_window[t] - m.demand_satisfied[t])**2 for t in m.t)
+                    cost += demand_penalty
+                return cost
+            model.obj = Objective(expr=objective_expr, sense=minimize)
 
         elif self.config.objective_function == "profit_maximization":
-            def objective(x):
-                return self._build_profit_maximization_objective(
-                    demand_window, x, window_start, window_length,
-                    fixed_production, flexible_production, inputs
-                )
+            sell_price = inputs["commodity_sell_price"]
 
-        else:
-            raise ValueError(f"Unknown objective_function: {self.config.objective_function}")
-            def objective(x):
-                return 0.0
+            def objective_expr(m):
+                profit = 0.0
+                for t in m.t:
+                    abs_t = window_start + t
+                    price = sell_price[abs_t]
+                    for i, tech in enumerate(self.dispatchable_techs):
+                        mc = marginal_costs[i]
+                        profit += (mc[abs_t] - price) * m.output[t, i] * dt_hours
+                return profit
+            model.obj = Objective(expr=objective_expr, sense=minimize)
 
-        # No explicit constraints; energy balance is enforced via penalty in objective
-        constraints = []
+        # Solve using Pyomo solver
+        solver = self._get_pyomo_solver()
+        solve_successful = False
+        if solver is not None:
+            try:
+                results = solver.solve(model, tee=False)
+                if results.solver.status == SolverStatus.ok:
+                    solve_successful = True
+                else:
+                    warnings.warn(f"Pyomo solver status: {results.solver.status}")
+            except Exception as e:
+                warnings.warn(f"Pyomo solve error: {e}")
 
-        # Solve
-        result = minimize(objective, x0, method='SLSQP', bounds=bounds, constraints=constraints,
-                         options={'ftol': 1e-6, 'maxiter': 100})
+        # Fallback: use greedy heuristic if solver fails or unavailable
+        if not solve_successful:
+            warnings.warn("No solver available; using greedy dispatch heuristic")
+            self._solve_optimization_greedy(model, demand_window, fixed_production, flexible_production,
+                                           dispatchable_capacities, window_length)
+            solve_successful = True
 
-        # Extract dispatch decisions from solution
+        # Extract dispatch decisions
         dispatch_decisions = {}
 
-        # Dispatchable techs
         for i, tech in enumerate(self.dispatchable_techs):
-            outputs = result.x[i * window_length:(i + 1) * window_length]
+            outputs = np.array([value(model.output[t, i]) for t in model.t])
             dispatch_decisions[tech] = outputs
+            # Track last output for ramping
+            self.last_output_per_tech[tech] = outputs[-1]
 
-        # Storage techs
         for i, tech in enumerate(self.storage_techs):
-            var_start = n_disp_vars + i * window_length
-            outputs = result.x[var_start:var_start + window_length]
+            outputs = np.array([value(model.discharge[t, i] - model.charge[t, i]) for t in model.t])
             dispatch_decisions[tech] = outputs
+            # Track last SOC for next window
+            self.last_soc_per_tech[tech] = value(model.soc[window_length-1, i])
 
-        return None, dispatch_decisions
+        return model, dispatch_decisions
 
-    def _build_cost_minimization_objective(self, demand_window, x, window_start, window_length,
-                                           fixed_production, flexible_production, inputs):
-        """Build objective for cost minimization with demand satisfaction penalty.
+    def _solve_optimization_greedy(self, model, demand_window, fixed_production, flexible_production,
+                                   dispatchable_capacities, window_length):
+        """Fallback greedy heuristic when no Pyomo solver available.
 
-        Minimizes: ∑_t [∑_i marginal_cost[i,t] * output[i,t] + 1e6 * demand_error[t]]
-
-        The large penalty coefficient (1e6) ensures demand is met while still preferring cheaper techs.
-
-        Args:
-            demand_window: Demand profile for this window
-            x: Optimization variable vector (dispatchable outputs, then storage)
-            window_start: Starting timestep
-            window_length: Window length in timesteps
-            fixed_production: Pre-computed fixed tech production
-            flexible_production: Pre-computed flexible tech production
-            inputs: OpenMDAO inputs dict
-
-        Returns:
-            float: Objective value
+        Sets Pyomo variables to feasible values without optimization.
         """
-        # Get marginal costs for each dispatchable tech (pre-computed in setup)
-        marginal_costs = self._compute_marginal_costs(inputs)
-
-        n_disp_vars = len(self.dispatchable_techs) * window_length
-        total_cost = 0.0
-        demand_penalty = 0.0
-        penalty_weight = 1e6  # Large penalty to force demand satisfaction
-
         for t in range(window_length):
-            abs_t = window_start + t
+            remaining = demand_window[t] - fixed_production[t] - flexible_production[t]
 
-            # Sum dispatchable production
-            disp_prod = sum(x[i * window_length + t] for i in range(len(self.dispatchable_techs)))
+            # Dispatch generators in order to meet demand
+            for i in range(len(self.dispatchable_techs)):
+                if remaining <= 1e-6:
+                    model.output[t, i].set_value(0.0)
+                else:
+                    dispatch = min(remaining, dispatchable_capacities[i])
+                    model.output[t, i].set_value(dispatch)
+                    remaining -= dispatch
 
-            # Sum storage production
-            storage_prod = sum(x[n_disp_vars + i * window_length + t] for i in range(len(self.storage_techs)))
+            # Satisfy demand
+            model.demand_satisfied[t].set_value(demand_window[t] - remaining)
 
-            # Total production
-            total_prod = disp_prod + storage_prod + fixed_production[t] + flexible_production[t]
+            # Storage: no charge/discharge by default
+            for i in range(len(self.storage_techs)):
+                model.charge[t, i].set_value(0.0)
+                model.discharge[t, i].set_value(0.0)
+                # Initialize SOC
+                if t == 0:
+                    storage_tech = self.storage_techs[i]
+                    # Try to get capacity from config
+                    cap = 100000  # Default 100 MWh
+                    try:
+                        plant_cfg = self.options["plant_config"]
+                        if isinstance(plant_cfg, dict) and "technologies" in plant_cfg:
+                            cap = plant_cfg["technologies"].get(storage_tech, {}).get(
+                                "model_inputs", {}).get("shared_parameters", {}).get("max_capacity", cap)
+                    except:
+                        pass
 
-            # Demand error
-            error = demand_window[t] - total_prod
-            demand_penalty += penalty_weight * (max(error, 0) ** 2)  # Penalize under-production
+                    if cap == 100000:  # Still default, try tech_config
+                        try:
+                            tech_cfg = self.options["tech_config"]
+                            if isinstance(tech_cfg, dict):
+                                cap = tech_cfg.get(storage_tech, {}).get(
+                                    "model_inputs", {}).get("shared_parameters", {}).get("max_capacity", cap)
+                        except:
+                            pass
 
-            # Add marginal costs for this timestep
-            dt_hours = self.options["plant_config"]["plant"]["simulation"]["dt"] / 3600
-            for i, tech in enumerate(self.dispatchable_techs):
-                mc = marginal_costs[i]  # shape (n_timesteps,)
-                output = x[i * window_length + t]
-                cost_contribution = mc[abs_t] * output * dt_hours
-                total_cost += cost_contribution
+                    init_soc = self.last_soc_per_tech.get(storage_tech, 0.5 * cap)
+                    model.soc[t, i].set_value(init_soc)
+                else:
+                    model.soc[t, i].set_value(model.soc[t-1, i].value)
 
-        return total_cost + demand_penalty
+    def _get_pyomo_solver(self):
+        """Get Pyomo solver with fallback logic.
 
-    def _build_profit_maximization_objective(self, demand_window, x, window_start, window_length,
-                                             fixed_production, flexible_production, inputs):
-        """Build objective for profit maximization (NO demand satisfaction penalty).
-
-        Minimizes: ∑_t [(marginal_cost[i,t] - sell_price[t]) * output[i,t]]
-
-        Dispatch occurs only when profitable (sell_price > marginal_cost).
-        Unlike cost minimization, demand satisfaction is NOT guaranteed.
-
-        Args:
-            demand_window: Demand profile for this window (used for reference)
-            x: Optimization variable vector
-            window_start: Starting timestep
-            window_length: Window length in timesteps
-            fixed_production: Pre-computed fixed tech production
-            flexible_production: Pre-computed flexible tech production
-            inputs: OpenMDAO inputs dict
-
-        Returns:
-            float: Objective value to minimize
+        Tries configured solver, falls back to glpk if unavailable.
         """
-        sell_price = inputs["commodity_sell_price"]  # shape (n_timesteps,)
-        marginal_costs = self._compute_marginal_costs(inputs)
+        try:
+            solver = SolverFactory(self.config.solver_name)
+            if solver.available(exception_flag=False):
+                return solver
+        except:
+            pass
 
-        n_disp_vars = len(self.dispatchable_techs) * window_length
-        total_objective = 0.0
-        dt_hours = self.options["plant_config"]["plant"]["simulation"]["dt"] / 3600
+        # Fallback to glpk
+        try:
+            warnings.warn(f"{self.config.solver_name} not available, trying glpk")
+            solver = SolverFactory("glpk")
+            if solver.available(exception_flag=False):
+                return solver
+        except:
+            pass
 
-        for t in range(window_length):
-            abs_t = window_start + t
-            price = sell_price[abs_t]
-
-            for i, tech in enumerate(self.dispatchable_techs):
-                mc = marginal_costs[i]  # shape (n_timesteps,)
-                var_idx = i * window_length + t
-                output = x[var_idx]
-
-                # Objective: minimize (cost - price) * output
-                # Only dispatch if cost < price (profitable)
-                profit_margin = mc[abs_t] - price
-                contribution = profit_margin * output * dt_hours
-                total_objective += contribution
-
-        return total_objective
+        # Final fallback to ipopt
+        warnings.warn("glpk not available, trying ipopt")
+        return SolverFactory("ipopt")
 
     def _extract_and_output_dispatch(self, dispatch_decisions, window_start, simulation_range, outputs):
         """Map first-window dispatch decision to OpenMDAO set-point outputs.
