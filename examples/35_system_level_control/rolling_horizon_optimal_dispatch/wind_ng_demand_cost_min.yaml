@@ -1,0 +1,6 @@
+name: wind_ng_demand_cost_min
+description: Wind and natural gas plant with rolling horizon cost minimization dispatch.
+scenarios:
+  - plant_config: plant_config_cost_min.yaml
+    technology_config: tech_config.yaml
+    driver_config: driver_config.yaml

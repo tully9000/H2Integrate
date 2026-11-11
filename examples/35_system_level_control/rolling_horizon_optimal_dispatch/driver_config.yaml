@@ -1,0 +1,10 @@
+name: driver_config
+description: Driver configuration for rolling horizon optimal dispatch examples.
+
+optimization:
+  driver:
+    type: null  # No optimization driver, just run model
+
+variables: []
+objectives: []
+constraints: []

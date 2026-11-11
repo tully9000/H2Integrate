@@ -1,0 +1,6 @@
+name: wind_ng_demand_profit_max
+description: Wind and natural gas plant with rolling horizon profit maximization dispatch.
+scenarios:
+  - plant_config: plant_config_profit_max.yaml
+    technology_config: tech_config.yaml
+    driver_config: driver_config.yaml
