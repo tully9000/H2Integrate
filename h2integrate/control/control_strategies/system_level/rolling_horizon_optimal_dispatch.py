@@ -367,6 +367,9 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
         # Dispatchable output variables
         model.output = Var(model.t, range(len(self.dispatchable_techs)), within=NonNegativeReals)
 
+        # Flexible tech output variables (can be curtailed to ≤ uncurtailed output)
+        model.flex_output = Var(model.t, range(len(self.flexible_techs)), within=NonNegativeReals)
+
         # Storage variables
         model.soc = Var(model.t, range(len(self.storage_techs)), within=NonNegativeReals)
         model.charge = Var(model.t, range(len(self.storage_techs)), within=NonNegativeReals)
@@ -386,6 +389,11 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
             for i, cap in enumerate(dispatchable_capacities):
                 model.output[t, i].setub(cap)
                 model.output[t, i].set_value(0.0)
+
+        # Initialize flexible tech outputs to zero
+        for t in model.t:
+            for i in range(len(self.flexible_techs)):
+                model.flex_output[t, i].set_value(0.0)
 
         # Set bounds and initialize storage variables
         storage_capacities = storage_info['capacities']
@@ -425,10 +433,20 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
         def energy_balance_rule(m, t):
             disp_prod = sum(m.output[t, i] for i in range(len(self.dispatchable_techs)))
             storage_net = sum(m.charge[t, i] - m.discharge[t, i] for i in range(len(self.storage_techs)))
-            # Sum flexible tech outputs from parameters
-            flex_prod = sum(getattr(m, f"flex_out_{tech}")[t] for tech in self.flexible_techs)
+            # Sum flexible tech output variables (can be curtailed)
+            flex_prod = sum(m.flex_output[t, i] for i in range(len(self.flexible_techs)))
             return disp_prod + fixed_production[t] + flex_prod == m.demand_satisfied[t] + storage_net
         model.energy_balance = Constraint(model.t, rule=energy_balance_rule)
+
+        # Flexible tech curtailment constraint: output ≤ uncurtailed availability
+        def flex_curtailment_rule(m, t, i):
+            flex_tech = self.flexible_techs[i]
+            param_name = f"flex_out_{flex_tech}"
+            if hasattr(m, param_name):
+                flex_param = getattr(m, param_name)
+                return m.flex_output[t, i] <= flex_param[t]
+            return Constraint.Skip
+        model.flex_curtailment = Constraint(model.t, range(len(self.flexible_techs)), rule=flex_curtailment_rule)
 
         # Storage SOC dynamics
         def soc_balance_rule(m, t, i):
@@ -554,6 +572,10 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
             dispatch_decisions[tech] = outputs
             self.last_soc_per_tech[tech] = value(model.soc[window_length-1, i])
 
+        for i, tech in enumerate(self.flexible_techs):
+            outputs = np.array([value(model.flex_output[t, i]) for t in model.t])
+            dispatch_decisions[tech] = outputs
+
         return dispatch_decisions
 
     def _solve_optimization_greedy(self, model, demand_window, fixed_production, flexible_production,
@@ -563,9 +585,20 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
         Sets Pyomo variables to feasible values without optimization.
         """
         for t in range(window_length):
-            remaining = demand_window[t] - fixed_production[t] - flexible_production[t]
+            # Calculate flexible production for this timestep
+            flex_prod = sum(flexible_production.get(tech, np.zeros(window_length))[t]
+                           for tech in self.flexible_techs)
 
-            # Dispatch generators in order to meet demand
+            remaining = demand_window[t] - fixed_production[t] - flex_prod
+
+            # Set flexible tech outputs to their full uncurtailed availability
+            for i, tech in enumerate(self.flexible_techs):
+                if tech in flexible_production:
+                    model.flex_output[t, i].set_value(flexible_production[tech][t])
+                else:
+                    model.flex_output[t, i].set_value(0.0)
+
+            # Dispatch generators in order to meet remaining demand
             for i in range(len(self.dispatchable_techs)):
                 if remaining <= 1e-6:
                     model.output[t, i].set_value(0.0)
@@ -665,7 +698,13 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
                 self.n_timesteps_window, tau_0_dispatch[tech]
             )
 
-
+        # Flexible techs
+        for tech in self.flexible_techs:
+            tech_idx = self.flexible_techs.index(tech)
+            set_point_name = self.flexible_set_point_names[tech_idx]
+            outputs[set_point_name][simulation_range] = np.full(
+                self.n_timesteps_window, tau_0_dispatch[tech]
+            )
     def _has_time_index(self, component, time_set):
         """Check if component's index set includes time dimension."""
         if not component.is_indexed():
