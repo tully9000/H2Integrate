@@ -30,6 +30,9 @@ class RollingHorizonOptimalDispatchConfig(BaseConfig):
             of rated capacity per hour. Example: {"ng1": 10.0, "ng2": 20.0}.
         cost_per_tech (dict): Marginal cost specification per dispatchable tech.
             Values can be numeric ($/kWh), "buy_price", "VarOpEx", or "feedstock".
+        commodity_sell_price (float | str): Sell price for profit maximization.
+            Can be numeric ($/kWh) or reference to finance group name.
+            Default: 0.0 (no revenue).
     """
 
     objective_function: str = field(default="demand_following")
@@ -40,6 +43,7 @@ class RollingHorizonOptimalDispatchConfig(BaseConfig):
     enable_demand_shed: bool = field(default=False)
     ramp_rate_limits_pct_per_hour: dict = field(factory=dict)
     cost_per_tech: dict = field(factory=dict)
+    commodity_sell_price: float | str = field(default=0.0)
 
 
 @register
@@ -91,9 +95,25 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
 
         # For profit maximization: add commodity sell price input
         if config.objective_function == "profit_maximization":
+            commodity_sell_price = config.commodity_sell_price
+
+            # If string, resolve from finance groups (like ProfitMaximizationControl does)
+            if isinstance(commodity_sell_price, str):
+                finance_groups = (
+                    self.options["plant_config"].get("finance_parameters", {}).get("finance_groups", {})
+                )
+                group = finance_groups.get(commodity_sell_price)
+                if group is None:
+                    raise ValueError(
+                        f"commodity_sell_price references finance group '{commodity_sell_price}', "
+                        f"but it was not found in finance_parameters.finance_groups. "
+                        f"Available groups: {list(finance_groups.keys())}"
+                    )
+                commodity_sell_price = group.get("model_inputs", {}).get("commodity_sell_price", 0.0)
+
             self.add_input(
                 "commodity_sell_price",
-                val=0.0,
+                val=commodity_sell_price,
                 shape=self.n_timesteps,
                 units=f"USD/({self.commodity_rate_units}*h)",
                 desc=f"Sell price per unit of {self.commodity}",
@@ -188,8 +208,13 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
         # Initial guess: try to meet demand with dispatchable techs, preferring cheaper ones if available
         x0 = np.zeros(n_vars)
 
+        # For profit maximization, start with zero dispatch (only dispatch if profitable)
+        if self.config.objective_function == "profit_maximization":
+            # Initial guess: zero dispatch
+            x0 = np.zeros(n_vars)
+
         # For cost minimization, sort techs by cost and dispatch in order
-        if self.config.objective_function == "cost_minimization" and marginal_costs:
+        elif self.config.objective_function == "cost_minimization" and marginal_costs:
             # Get mean cost per tech and sort
             mean_costs = [marginal_costs[i].mean() for i in range(len(self.dispatchable_techs))]
             cost_order = sorted(range(len(self.dispatchable_techs)), key=lambda i: mean_costs[i])
@@ -206,7 +231,7 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
                     x0[var_idx] = dispatch
                     remaining -= dispatch
         else:
-            # Default: split equally
+            # Default: split equally or zero
             for t in range(window_length):
                 remaining = demand_window[t] - fixed_production[t] - flexible_production[t]
                 for i in range(len(self.dispatchable_techs)):
@@ -247,9 +272,11 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
                 )
 
         elif self.config.objective_function == "profit_maximization":
-            # Phase C: placeholder
             def objective(x):
-                return 0.0
+                return self._build_profit_maximization_objective(
+                    demand_window, x, window_start, window_length,
+                    fixed_production, flexible_production, inputs
+                )
 
         else:
             raise ValueError(f"Unknown objective_function: {self.config.objective_function}")
@@ -333,10 +360,50 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
 
         return total_cost + demand_penalty
 
-    def _build_profit_maximization_objective(self, model, inputs, window_start, window_length):
-        """Build profit maximization objective for Pyomo model (Phase C feature)."""
-        # Placeholder: will be implemented in Phase C
-        raise NotImplementedError("Profit maximization objective is Phase C work.")
+    def _build_profit_maximization_objective(self, demand_window, x, window_start, window_length,
+                                             fixed_production, flexible_production, inputs):
+        """Build objective for profit maximization (NO demand satisfaction penalty).
+
+        Minimizes: ∑_t [(marginal_cost[i,t] - sell_price[t]) * output[i,t]]
+
+        Dispatch occurs only when profitable (sell_price > marginal_cost).
+        Unlike cost minimization, demand satisfaction is NOT guaranteed.
+
+        Args:
+            demand_window: Demand profile for this window (used for reference)
+            x: Optimization variable vector
+            window_start: Starting timestep
+            window_length: Window length in timesteps
+            fixed_production: Pre-computed fixed tech production
+            flexible_production: Pre-computed flexible tech production
+            inputs: OpenMDAO inputs dict
+
+        Returns:
+            float: Objective value to minimize
+        """
+        sell_price = inputs["commodity_sell_price"]  # shape (n_timesteps,)
+        marginal_costs = self._compute_marginal_costs(inputs)
+
+        n_disp_vars = len(self.dispatchable_techs) * window_length
+        total_objective = 0.0
+        dt_hours = self.options["plant_config"]["plant"]["simulation"]["dt"] / 3600
+
+        for t in range(window_length):
+            abs_t = window_start + t
+            price = sell_price[abs_t]
+
+            for i, tech in enumerate(self.dispatchable_techs):
+                mc = marginal_costs[i]  # shape (n_timesteps,)
+                var_idx = i * window_length + t
+                output = x[var_idx]
+
+                # Objective: minimize (cost - price) * output
+                # Only dispatch if cost < price (profitable)
+                profit_margin = mc[abs_t] - price
+                contribution = profit_margin * output * dt_hours
+                total_objective += contribution
+
+        return total_objective
 
     def _extract_and_output_dispatch(self, dispatch_decisions, window_start, simulation_range, outputs):
         """Map first-window dispatch decision to OpenMDAO set-point outputs.
