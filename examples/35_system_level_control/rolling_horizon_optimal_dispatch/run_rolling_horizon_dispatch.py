@@ -12,9 +12,16 @@ The rolling horizon optimizer considers a 24-hour lookahead window when making
 dispatch decisions, providing globally optimal solutions vs. greedy merit-order.
 """
 
+import sys
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
+
+# Ensure the H2Integrate repo is in the Python path
+script_path = Path(__file__).resolve()
+repo_root = script_path.parent.parent.parent.parent
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
 
 from h2integrate.core.h2integrate_model import H2IntegrateModel
 
