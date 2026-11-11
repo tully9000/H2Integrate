@@ -205,7 +205,7 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
             for flexible_tech in self.flexible_techs:
                 rated_name = f"{flexible_tech}_rated_{self.commodity}_production"
                 if rated_name in inputs:
-                    flexible_production[tau] += inputs[rated_name]
+                    flexible_production[tau] += inputs[rated_name][0]
 
         # Get capacity bounds
         dispatchable_capacities = []
@@ -283,11 +283,14 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
 
         # Demand satisfaction slack (for soft constraints)
         model.demand_satisfied = Var(model.t, within=NonNegativeReals)
+        for t in model.t:
+            model.demand_satisfied[t].set_value(0.0)  # Initialize to zero
 
         # Set initial bounds for dispatchable techs
         for t in model.t:
             for i, cap in enumerate(dispatchable_capacities):
                 model.output[t, i].setub(cap)
+                model.output[t, i].set_value(0.0)  # Initialize to zero
 
         # Set SOC bounds and charge/discharge limits
         for t in model.t:
@@ -297,6 +300,15 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
                 model.soc[t, i].setlb(cap * storage_min_soc_frac[storage_tech])
                 model.charge[t, i].setub(storage_max_charge_rate[storage_tech] * dt_hours)
                 model.discharge[t, i].setub(storage_max_discharge_rate[storage_tech] * dt_hours)
+                # Initialize to zero
+                model.charge[t, i].set_value(0.0)
+                model.discharge[t, i].set_value(0.0)
+                # Initial SOC
+                if t == 0:
+                    init_soc = self.last_soc_per_tech.get(storage_tech, 0.5 * cap)
+                    model.soc[t, i].set_value(init_soc)
+                else:
+                    model.soc[t, i].set_value(0.0)
 
         # Energy balance constraint
         def energy_balance_rule(m, t):
@@ -392,19 +404,22 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
         if solver is not None:
             try:
                 results = solver.solve(model, tee=False)
-                if results.solver.status == SolverStatus.ok:
-                    solve_successful = True
-                else:
-                    warnings.warn(f"Pyomo solver status: {results.solver.status}")
+                # Check both solver status and termination condition
+                if hasattr(results, 'solver'):
+                    status = results.solver.status
+                    termination = results.solver.termination_condition if hasattr(results.solver, 'termination_condition') else None
+                    if status == SolverStatus.ok or (termination and str(termination) == 'optimal'):
+                        solve_successful = True
+                    else:
+                        warnings.warn(f"Pyomo solver status: {status}, termination: {termination}")
             except Exception as e:
                 warnings.warn(f"Pyomo solve error: {e}")
 
         # Fallback: use greedy heuristic if solver fails or unavailable
         if not solve_successful:
-            warnings.warn("No solver available; using greedy dispatch heuristic")
+            warnings.warn("Using greedy dispatch heuristic (solver unavailable or failed)")
             self._solve_optimization_greedy(model, demand_window, fixed_production, flexible_production,
                                            dispatchable_capacities, window_length)
-            solve_successful = True
 
         # Extract dispatch decisions
         dispatch_decisions = {}
