@@ -1,0 +1,5 @@
+name: wind_ng_battery_demand_following
+description: Wind, natural gas, and battery storage with rolling horizon demand following dispatch.
+driver_config: driver_config.yaml
+technology_config: tech_config_battery.yaml
+plant_config: plant_config_demand_following_battery.yaml
