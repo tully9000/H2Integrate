@@ -1,5 +1,8 @@
 name: plant_config_rho_demand_following_battery
-description: Rolling Horizon Optimal Dispatch with demand following and battery storage. Located in Texas, USA.
+description: |
+  Rolling Horizon Optimal Dispatch with demand following and battery storage.
+  Extends plant_config_rho_base_battery.yaml with demand_following objective.
+  Located in Texas, USA.
 sites:
   site:
     latitude: 30.6617

@@ -1,5 +1,8 @@
 name: plant_config_rho_cost_min
-description: Rolling Horizon Optimal Dispatch with cost minimization. Located in Texas, USA.
+description: |
+  Rolling Horizon Optimal Dispatch with cost minimization (no battery).
+  Extends plant_config_rho_base.yaml with cost_minimization objective.
+  Located in Texas, USA.
 sites:
   site:
     latitude: 30.6617
@@ -11,16 +14,12 @@ sites:
           resource_year: 2013
 
 technology_interconnections:
-  # connect NG feedstock to NG plant
   - [ng_feedstock, natural_gas_plant, natural_gas, pipe]
-  # combine the electricity production
   - [wind, combiner, electricity, cable]
   - [natural_gas_plant, combiner, electricity, cable]
-  # subtract the combined electricity production from the demand
   - [combiner, electrical_load_demand, electricity, cable]
 
 site_to_tech_connections:
-  # connect the wind resource to the wind technology
   - [site.wind_resource, wind, wind_resource_data]
 
 plant:
@@ -34,11 +33,8 @@ system_level_control:
   demand_component: electrical_load_demand
   control_parameters:
     rolling_horizon_optimal_dispatch:
-      # Cost minimization objective: dispatch cheaper generators first
       objective_function: cost_minimization
-      # 24-hour lookahead window for optimization
       horizon_length_hours: 24
-      # Marginal cost for each dispatchable tech: natural_gas=fixed, wind=free
       cost_per_tech:
         natural_gas_plant: 0.06  # $0.06/kWh
   solver_options:

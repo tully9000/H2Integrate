@@ -1,5 +1,8 @@
 name: plant_config_rho_cost_min_battery
-description: Rolling Horizon Optimal Dispatch with cost minimization and battery storage. Located in Texas, USA.
+description: |
+  Rolling Horizon Optimal Dispatch with cost minimization and battery storage.
+  Extends plant_config_rho_base_battery.yaml with cost_minimization objective.
+  Located in Texas, USA.
 sites:
   site:
     latitude: 30.6617

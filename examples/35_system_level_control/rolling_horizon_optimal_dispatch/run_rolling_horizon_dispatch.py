@@ -31,10 +31,10 @@ from h2integrate.core.h2integrate_model import H2IntegrateModel
 script_dir = Path(__file__).parent
 
 cases = {
+    "cost_minimization": script_dir / "wind_ng_demand_cost_min.yaml",
+    "profit_maximization": script_dir / "wind_ng_demand_profit_max.yaml",
+    "cost_min_battery": script_dir / "wind_ng_battery_demand_cost_min.yaml",
     "demand_following_battery": script_dir / "wind_ng_battery_demand_following.yaml",
-    # "cost_min_battery": script_dir / "wind_ng_battery_demand_cost_min.yaml",
-    # "cost_minimization": script_dir / "wind_ng_demand_cost_min.yaml",
-    # "profit_maximization": script_dir / "wind_ng_demand_profit_max.yaml",
 }
 
 # Plot the first 168 hours (1 week)
@@ -58,19 +58,22 @@ for case, config_file in cases.items():
     wind_out = h2i.prob.get_val("plant.wind.electricity_out")[:n_hours]
     ng_out = h2i.prob.get_val("plant.natural_gas_plant.electricity_out", units="kW")[:n_hours]
     demand = h2i.prob.get_val("plant.electrical_load_demand.electricity_demand")[:n_hours]
+    electricity_out = h2i.prob.get_val("plant.electrical_load_demand.electricity_out")[:n_hours]
     curtailed = h2i.prob.get_val("plant.electrical_load_demand.unused_electricity_out")[:n_hours]
 
     if has_battery:
+        batt_charge = h2i.prob.get_val("plant.battery.storage_electricity_charge")[:n_hours]
         batt_discharge = h2i.prob.get_val("plant.battery.storage_electricity_discharge")[:n_hours]
         batt_soc = h2i.prob.get_val("plant.battery.SOC")[:n_hours]
     else:
+        batt_charge = np.zeros(n_hours)
         batt_discharge = np.zeros(n_hours)
 
     n_rows = 3 if has_battery else 2
     fig, axes = plt.subplots(n_rows, 1, figsize=(12, 2 + 8 * n_rows / 3), sharex=True)
 
     # Stacked fill_between: wind + battery discharge + NG = total supply
-    axes[0].fill_between(hours, 0, wind_out, alpha=0.5, color="tab:blue", label="Wind")
+    axes[0].fill_between(hours, 0, wind_out, alpha=0.5, color="tab:blue", step="post", label="Wind")
 
     if has_battery:
         axes[0].fill_between(
@@ -78,6 +81,7 @@ for case, config_file in cases.items():
             wind_out,
             wind_out + batt_discharge,
             alpha=0.5,
+            step="post",
             color="tab:purple",
             label="Battery Discharge",
         )
@@ -87,6 +91,7 @@ for case, config_file in cases.items():
         wind_out + batt_discharge,
         wind_out + batt_discharge + ng_out,
         alpha=0.5,
+        step="post",
         color="tab:orange",
         label="Natural Gas",
     )
@@ -94,13 +99,25 @@ for case, config_file in cases.items():
     axes[0].fill_between(
         hours,
         wind_out + batt_discharge + ng_out,
-        wind_out + batt_discharge + ng_out + curtailed,
+        wind_out + batt_discharge + ng_out - curtailed,
         alpha=0.5,
+        step="post",
         color="tab:red",
         label="Curtailment",
     )
+    axes[0].fill_between(
+        hours,
+        wind_out + batt_discharge + ng_out - curtailed,
+        wind_out + batt_discharge + ng_out - curtailed + batt_charge,
+        alpha=0.5,
+        step="post",
+        color="tab:purple",
+        label="Battery charge",
+    )
 
     axes[0].plot(hours, demand, color="black", linewidth=1.5, linestyle="--", label="Demand")
+    axes[0].plot(hours, electricity_out, color="black", linewidth=1.0, label="Electricity out")
+
     axes[0].set_ylabel("Power (kW)")
     axes[0].set_title(f"Rolling Horizon Optimal Dispatch ({case.replace('_', ' ').title()}): First 168 Hours")
     axes[0].legend(loc="upper right")
@@ -109,7 +126,7 @@ for case, config_file in cases.items():
         axes[1].plot(hours, batt_soc, color="tab:cyan")
         axes[1].set_ylabel("Battery SOC (%)")
 
-    axes[-1].bar(hours, curtailed, width=1.0, color="tab:red", align="edge")
+    axes[-1].fill_between(hours, np.zeros(len(hours)), curtailed, alpha=0.5, color="tab:red", step="post")
     axes[-1].set_ylabel("Curtailed (kW)")
     axes[-1].set_xlabel("Hour")
 

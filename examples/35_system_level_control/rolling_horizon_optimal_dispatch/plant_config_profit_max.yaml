@@ -1,5 +1,8 @@
 name: plant_config_rho_profit_max
-description: Rolling Horizon Optimal Dispatch with profit maximization. Located in Texas, USA.
+description: |
+  Rolling Horizon Optimal Dispatch with profit maximization (no battery).
+  Extends plant_config_rho_base.yaml with profit_maximization objective.
+  Located in Texas, USA.
 sites:
   site:
     latitude: 30.6617
