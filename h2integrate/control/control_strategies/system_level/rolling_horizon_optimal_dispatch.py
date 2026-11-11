@@ -271,20 +271,26 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
                 if in_name in inputs:
                     fixed_production[tau] += inputs[in_name][abs_tau]
 
-        # Get dispatchable capacity bounds
-        dispatchable_capacities = []
+        # Get dispatchable capacity bounds (as dict keyed by tech name)
+        dispatchable_capacities = {}
         for i, tech in enumerate(self.dispatchable_techs):
             rated_name = self.dispatchable_rated_names[i]
             cap_val = inputs[rated_name]
             if hasattr(cap_val, 'item'):
                 cap_val = cap_val.item()
-            dispatchable_capacities.append(cap_val)
+            dispatchable_capacities[tech] = cap_val
 
         # Get storage capacities and efficiencies
         storage_info = self._get_storage_config_info()
 
-        # Compute marginal costs
-        marginal_costs = self._compute_marginal_costs(inputs) if self.config.objective_function in ("cost_minimization", "profit_maximization") else []
+        # Compute marginal costs and convert to dict keyed by tech name
+        marginal_costs_list = self._compute_marginal_costs(inputs) if self.config.objective_function in ("cost_minimization", "profit_maximization") else []
+        marginal_costs = {}
+        for i, tech in enumerate(self.dispatchable_techs):
+            if i < len(marginal_costs_list):
+                marginal_costs[tech] = marginal_costs_list[i]
+            else:
+                marginal_costs[tech] = np.zeros(self.n_timesteps)
 
         return demand_window, dt_hours, fixed_production, flexible_production, dispatchable_capacities, storage_info, marginal_costs
 
@@ -364,16 +370,23 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
         model = ConcreteModel()
         model.t = Set(initialize=range(window_length))
 
-        # Dispatchable output variables
-        model.output = Var(model.t, range(len(self.dispatchable_techs)), within=NonNegativeReals)
+        # Technology index sets (strings instead of numeric indices)
+        model.fixed_techs = Set(initialize=self.fixed_techs)
+        model.flexible_techs = Set(initialize=self.flexible_techs)
+        model.dispatchable_techs = Set(initialize=self.dispatchable_techs)
+        model.storage_techs = Set(initialize=self.storage_techs)
+        model.feedstock_techs = Set(initialize=self.feedstock_comps)
 
-        # Flexible tech output variables (can be curtailed to ≤ uncurtailed output)
-        model.flex_output = Var(model.t, range(len(self.flexible_techs)), within=NonNegativeReals)
+        # Dispatchable output variables indexed by time and tech name
+        model.output = Var(model.t, model.dispatchable_techs, within=NonNegativeReals)
 
-        # Storage variables
-        model.soc = Var(model.t, range(len(self.storage_techs)), within=NonNegativeReals)
-        model.charge = Var(model.t, range(len(self.storage_techs)), within=NonNegativeReals)
-        model.discharge = Var(model.t, range(len(self.storage_techs)), within=NonNegativeReals)
+        # Flexible tech output variables indexed by time and tech name
+        model.flex_output = Var(model.t, model.flexible_techs, within=NonNegativeReals)
+
+        # Storage variables indexed by time and tech name
+        model.soc = Var(model.t, model.storage_techs, within=NonNegativeReals)
+        model.charge = Var(model.t, model.storage_techs, within=NonNegativeReals)
+        model.discharge = Var(model.t, model.storage_techs, within=NonNegativeReals)
 
         # Demand satisfaction slack (for soft constraints)
         model.demand_satisfied = Var(model.t, within=NonNegativeReals)
@@ -381,19 +394,20 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
             model.demand_satisfied[t].set_value(0.0)
 
         # Flexible tech uncurtailed output parameters
-        for i, flex_tech in enumerate(self.flexible_techs):
+        for flex_tech in self.flexible_techs:
             setattr(model, f"flex_out_{flex_tech}", Param(model.t, mutable=True, default=0.0))
 
-        # Set bounds for dispatchable techs
+        # Set bounds for dispatchable techs using tech names
         for t in model.t:
-            for i, cap in enumerate(dispatchable_capacities):
-                model.output[t, i].setub(cap)
-                model.output[t, i].set_value(0.0)
+            for tech in self.dispatchable_techs:
+                cap = dispatchable_capacities[tech]
+                model.output[t, tech].setub(cap)
+                model.output[t, tech].set_value(0.0)
 
         # Initialize flexible tech outputs to zero
         for t in model.t:
-            for i in range(len(self.flexible_techs)):
-                model.flex_output[t, i].set_value(0.0)
+            for flex_tech in self.flexible_techs:
+                model.flex_output[t, flex_tech].set_value(0.0)
 
         # Set bounds and initialize storage variables
         storage_capacities = storage_info['capacities']
@@ -403,21 +417,21 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
         storage_max_discharge_rate = storage_info['max_discharge_rate']
 
         for t in model.t:
-            for i, storage_tech in enumerate(self.storage_techs):
+            for storage_tech in self.storage_techs:
                 cap = storage_capacities[storage_tech]
-                model.soc[t, i].setub(cap * storage_max_soc_frac[storage_tech])
-                model.soc[t, i].setlb(cap * storage_min_soc_frac[storage_tech])
-                model.charge[t, i].setub(storage_max_charge_rate[storage_tech] * dt_hours)
-                model.discharge[t, i].setub(storage_max_discharge_rate[storage_tech] * dt_hours)
+                model.soc[t, storage_tech].setub(cap * storage_max_soc_frac[storage_tech])
+                model.soc[t, storage_tech].setlb(cap * storage_min_soc_frac[storage_tech])
+                model.charge[t, storage_tech].setub(storage_max_charge_rate[storage_tech] * dt_hours)
+                model.discharge[t, storage_tech].setub(storage_max_discharge_rate[storage_tech] * dt_hours)
                 # Initialize to zero
-                model.charge[t, i].set_value(0.0)
-                model.discharge[t, i].set_value(0.0)
+                model.charge[t, storage_tech].set_value(0.0)
+                model.discharge[t, storage_tech].set_value(0.0)
                 # Initial SOC
                 if t == 0:
                     init_soc = self.last_soc_per_tech.get(storage_tech, 0.5 * cap)
-                    model.soc[t, i].set_value(init_soc)
+                    model.soc[t, storage_tech].set_value(init_soc)
                 else:
-                    model.soc[t, i].set_value(0.0)
+                    model.soc[t, storage_tech].set_value(0.0)
 
         return model
 
@@ -431,26 +445,25 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
 
         # Energy balance constraint
         def energy_balance_rule(m, t):
-            disp_prod = sum(m.output[t, i] for i in range(len(self.dispatchable_techs)))
-            storage_net = sum(m.charge[t, i] - m.discharge[t, i] for i in range(len(self.storage_techs)))
+            disp_prod = sum(m.output[t, tech] for tech in m.dispatchable_techs)
+            storage_net = sum(m.charge[t, tech] - m.discharge[t, tech] for tech in m.storage_techs)
             # Sum flexible tech output variables (can be curtailed)
-            flex_prod = sum(m.flex_output[t, i] for i in range(len(self.flexible_techs)))
+            flex_prod = sum(m.flex_output[t, tech] for tech in m.flexible_techs)
             return disp_prod + fixed_production[t] + flex_prod == m.demand_satisfied[t] + storage_net
         model.energy_balance = Constraint(model.t, rule=energy_balance_rule)
 
         # Flexible tech curtailment constraint: output ≤ uncurtailed availability
-        def flex_curtailment_rule(m, t, i):
-            flex_tech = self.flexible_techs[i]
-            param_name = f"flex_out_{flex_tech}"
+        def flex_curtailment_rule(m, t, tech):
+            param_name = f"flex_out_{tech}"
             if hasattr(m, param_name):
                 flex_param = getattr(m, param_name)
-                return m.flex_output[t, i] <= flex_param[t]
+                return m.flex_output[t, tech] <= flex_param[t]
             return Constraint.Skip
-        model.flex_curtailment = Constraint(model.t, range(len(self.flexible_techs)), rule=flex_curtailment_rule)
+        model.flex_curtailment = Constraint(model.t, model.flexible_techs, rule=flex_curtailment_rule)
 
         # Storage SOC dynamics
-        def soc_balance_rule(m, t, i):
-            storage_tech = self.storage_techs[i]
+        def soc_balance_rule(m, t, tech):
+            storage_tech = tech
             cap = storage_capacities[storage_tech]
             eff_c = storage_charge_efficiencies[storage_tech]
             eff_d = storage_discharge_efficiencies[storage_tech]
@@ -458,32 +471,30 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
             if t == 0:
                 prev_soc = self.last_soc_per_tech.get(storage_tech, 0.5 * cap)
             else:
-                prev_soc = m.soc[t-1, i]
+                prev_soc = m.soc[t-1, tech]
 
-            return m.soc[t, i] == prev_soc + (m.charge[t, i] * eff_c - m.discharge[t, i] / eff_d) * dt_hours / cap
-        model.soc_balance = Constraint(model.t, range(len(self.storage_techs)), rule=soc_balance_rule)
+            return m.soc[t, tech] == prev_soc + (m.charge[t, tech] * eff_c - m.discharge[t, tech] / eff_d) * dt_hours / cap
+        model.soc_balance = Constraint(model.t, model.storage_techs, rule=soc_balance_rule)
 
         # Ramping constraints (optional)
         if self.config.enable_ramping_constraints:
             ramp_limits = self.config.ramp_rate_limits_pct_per_hour
 
-            def ramp_up_rule(m, t, i):
+            def ramp_up_rule(m, t, tech):
                 if t == 0:
                     return Constraint.Skip
-                tech = self.dispatchable_techs[i]
                 ramp_pct = ramp_limits.get(tech, 100.0)
-                ramp_mw_per_hour = (ramp_pct / 100.0) * dispatchable_capacities[i]
-                return m.output[t, i] - m.output[t-1, i] <= ramp_mw_per_hour * dt_hours
-            model.ramp_up = Constraint(model.t, range(len(self.dispatchable_techs)), rule=ramp_up_rule)
+                ramp_mw_per_hour = (ramp_pct / 100.0) * dispatchable_capacities[tech]
+                return m.output[t, tech] - m.output[t-1, tech] <= ramp_mw_per_hour * dt_hours
+            model.ramp_up = Constraint(model.t, model.dispatchable_techs, rule=ramp_up_rule)
 
-            def ramp_down_rule(m, t, i):
+            def ramp_down_rule(m, t, tech):
                 if t == 0:
                     return Constraint.Skip
-                tech = self.dispatchable_techs[i]
                 ramp_pct = ramp_limits.get(tech, 100.0)
-                ramp_mw_per_hour = (ramp_pct / 100.0) * dispatchable_capacities[i]
-                return m.output[t-1, i] - m.output[t, i] <= ramp_mw_per_hour * dt_hours
-            model.ramp_down = Constraint(model.t, range(len(self.dispatchable_techs)), rule=ramp_down_rule)
+                ramp_mw_per_hour = (ramp_pct / 100.0) * dispatchable_capacities[tech]
+                return m.output[t-1, tech] - m.output[t, tech] <= ramp_mw_per_hour * dt_hours
+            model.ramp_down = Constraint(model.t, model.dispatchable_techs, rule=ramp_down_rule)
 
         # Demand satisfaction constraints (hard or soft depending on mode)
         if not self.config.enable_demand_shed:
@@ -504,9 +515,9 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
                 dt_hours = self.options["plant_config"]["plant"]["simulation"]["dt"] / 3600
                 for t in m.t:
                     abs_t = window_start + t
-                    for i, tech in enumerate(self.dispatchable_techs):
-                        mc = marginal_costs[i]
-                        cost += mc[abs_t] * m.output[t, i] * dt_hours
+                    for tech in m.dispatchable_techs:
+                        mc = marginal_costs[tech]
+                        cost += mc[abs_t] * m.output[t, tech] * dt_hours
 
                 if self.config.enable_demand_shed:
                     demand_penalty = sum(1e6 * (demand_window[t] - m.demand_satisfied[t])**2 for t in m.t)
@@ -522,9 +533,9 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
                 for t in m.t:
                     abs_t = window_start + t
                     price = sell_price[abs_t]
-                    for i, tech in enumerate(self.dispatchable_techs):
-                        mc = marginal_costs[i]
-                        profit += (mc[abs_t] - price) * m.output[t, i] * dt_hours
+                    for tech in m.dispatchable_techs:
+                        mc = marginal_costs[tech]
+                        profit += (mc[abs_t] - price) * m.output[t, tech] * dt_hours
                 return profit
             model.obj = Objective(expr=objective_expr, sense=minimize)
 
@@ -562,18 +573,18 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
         # Extract dispatch decisions
         dispatch_decisions = {}
 
-        for i, tech in enumerate(self.dispatchable_techs):
-            outputs = np.array([value(model.output[t, i]) for t in model.t])
+        for tech in self.dispatchable_techs:
+            outputs = np.array([value(model.output[t, tech]) for t in model.t])
             dispatch_decisions[tech] = outputs
             self.last_output_per_tech[tech] = outputs[-1]
 
-        for i, tech in enumerate(self.storage_techs):
-            outputs = np.array([value(model.discharge[t, i] - model.charge[t, i]) for t in model.t])
+        for tech in self.storage_techs:
+            outputs = np.array([value(model.discharge[t, tech] - model.charge[t, tech]) for t in model.t])
             dispatch_decisions[tech] = outputs
-            self.last_soc_per_tech[tech] = value(model.soc[window_length-1, i])
+            self.last_soc_per_tech[tech] = value(model.soc[window_length-1, tech])
 
-        for i, tech in enumerate(self.flexible_techs):
-            outputs = np.array([value(model.flex_output[t, i]) for t in model.t])
+        for tech in self.flexible_techs:
+            outputs = np.array([value(model.flex_output[t, tech]) for t in model.t])
             dispatch_decisions[tech] = outputs
 
         return dispatch_decisions
@@ -592,31 +603,31 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
             remaining = demand_window[t] - fixed_production[t] - flex_prod
 
             # Set flexible tech outputs to their full uncurtailed availability
-            for i, tech in enumerate(self.flexible_techs):
+            for tech in self.flexible_techs:
                 if tech in flexible_production:
-                    model.flex_output[t, i].set_value(flexible_production[tech][t])
+                    model.flex_output[t, tech].set_value(flexible_production[tech][t])
                 else:
-                    model.flex_output[t, i].set_value(0.0)
+                    model.flex_output[t, tech].set_value(0.0)
 
             # Dispatch generators in order to meet remaining demand
-            for i in range(len(self.dispatchable_techs)):
+            for tech in self.dispatchable_techs:
                 if remaining <= 1e-6:
-                    model.output[t, i].set_value(0.0)
+                    model.output[t, tech].set_value(0.0)
                 else:
-                    dispatch = min(remaining, dispatchable_capacities[i])
-                    model.output[t, i].set_value(dispatch)
+                    dispatch = min(remaining, dispatchable_capacities[tech])
+                    model.output[t, tech].set_value(dispatch)
                     remaining -= dispatch
 
             # Satisfy demand
             model.demand_satisfied[t].set_value(demand_window[t] - remaining)
 
             # Storage: no charge/discharge by default
-            for i in range(len(self.storage_techs)):
-                model.charge[t, i].set_value(0.0)
-                model.discharge[t, i].set_value(0.0)
+            for tech in self.storage_techs:
+                model.charge[t, tech].set_value(0.0)
+                model.discharge[t, tech].set_value(0.0)
                 # Initialize SOC
                 if t == 0:
-                    storage_tech = self.storage_techs[i]
+                    storage_tech = tech
                     # Try to get capacity from config
                     cap = 100000  # Default 100 MWh
                     try:
@@ -637,9 +648,9 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
                             pass
 
                     init_soc = self.last_soc_per_tech.get(storage_tech, 0.5 * cap)
-                    model.soc[t, i].set_value(init_soc)
+                    model.soc[t, tech].set_value(init_soc)
                 else:
-                    model.soc[t, i].set_value(model.soc[t-1, i].value)
+                    model.soc[t, tech].set_value(model.soc[t-1, tech].value)
 
     def _get_pyomo_solver(self):
         """Get Pyomo solver with fallback logic.
@@ -735,17 +746,17 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
 
         # Extract dispatchable tech outputs
         disp_outputs = {}
-        for i, tech in enumerate(self.dispatchable_techs):
-            disp_outputs[tech] = np.array([value(model.output[t, i]) for t in time_steps])
+        for tech in self.dispatchable_techs:
+            disp_outputs[tech] = np.array([value(model.output[t, tech]) for t in time_steps])
 
         # Extract storage state and flows
         storage_soc = {}
         storage_charge = {}
         storage_discharge = {}
-        for i, tech in enumerate(self.storage_techs):
-            storage_soc[tech] = np.array([value(model.soc[t, i]) for t in time_steps])
-            storage_charge[tech] = np.array([value(model.charge[t, i]) for t in time_steps])
-            storage_discharge[tech] = np.array([value(model.discharge[t, i]) for t in time_steps])
+        for tech in self.storage_techs:
+            storage_soc[tech] = np.array([value(model.soc[t, tech]) for t in time_steps])
+            storage_charge[tech] = np.array([value(model.charge[t, tech]) for t in time_steps])
+            storage_discharge[tech] = np.array([value(model.discharge[t, tech]) for t in time_steps])
 
         # Extract demand satisfaction
         demand_satisfied = np.array([value(model.demand_satisfied[t]) for t in time_steps])
