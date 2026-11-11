@@ -1,6 +1,5 @@
 name: wind_ng_battery_demand_cost_min
 description: Wind, natural gas, and battery storage with rolling horizon cost minimization dispatch.
-scenarios:
-  - plant_config: plant_config_cost_min_battery.yaml
-    technology_config: tech_config_battery.yaml
-    driver_config: driver_config.yaml
+driver_config: driver_config.yaml
+technology_config: tech_config_battery.yaml
+plant_config: plant_config_cost_min_battery.yaml

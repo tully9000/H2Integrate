@@ -14,14 +14,19 @@ dispatch decisions, providing globally optimal solutions vs. greedy merit-order.
 
 import numpy as np
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 from h2integrate.core.h2integrate_model import H2IntegrateModel
 
 
+
+# Get the directory where this script is located
+script_dir = Path(__file__).parent
+
 cases = {
-    "cost_minimization": "wind_ng_demand_cost_min.yaml",
-    "profit_maximization": "wind_ng_demand_profit_max.yaml",
-    "cost_min_battery": "wind_ng_battery_demand_cost_min.yaml",
+    "cost_minimization": script_dir / "wind_ng_demand_cost_min.yaml",
+    "profit_maximization": script_dir / "wind_ng_demand_profit_max.yaml",
+    "cost_min_battery": script_dir / "wind_ng_battery_demand_cost_min.yaml",
 }
 
 # Plot the first 168 hours (1 week)
@@ -30,7 +35,7 @@ hours = np.arange(n_hours)
 
 for case, config_file in cases.items():
     print(f"\nRunning {case}...")
-    h2i = H2IntegrateModel(config_file)
+    h2i = H2IntegrateModel(str(config_file))
     h2i.run()
     h2i.post_process()
 
