@@ -188,6 +188,43 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
             tuple: (model, dispatch_decisions) where dispatch_decisions maps
                 tech_name -> array of optimal outputs for window
         """
+        # Collect all necessary data from configs and inputs
+        (demand_window, dt_hours, fixed_production, flexible_production,
+         dispatchable_capacities, storage_info, marginal_costs) = self._collect_window_data(
+            inputs, window_start, window_end, window_length
+        )
+
+        # Build Pyomo model with variables and bounds
+        model = self._build_pyomo_model(
+            window_length, dispatchable_capacities, storage_info, dt_hours
+        )
+
+        # Add all constraints to model
+        self._add_model_constraints(
+            model, window_length, window_start, demand_window,
+            fixed_production, flexible_production, dispatchable_capacities, storage_info, dt_hours
+        )
+
+        # Set objective function based on configuration
+        self._set_model_objective(
+            model, window_start, demand_window, marginal_costs, inputs
+        )
+
+        # Solve model and extract results
+        dispatch_decisions = self._solve_and_extract_results(
+            model, window_length, demand_window, fixed_production,
+            flexible_production, dispatchable_capacities, storage_info
+        )
+
+        return model, dispatch_decisions
+
+    def _collect_window_data(self, inputs, window_start, window_end, window_length):
+        """Collect all tech configuration and input data for the optimization window.
+
+        Returns:
+            tuple: (demand_window, dt_hours, fixed_production, flexible_production,
+                    dispatchable_capacities, storage_info, marginal_costs)
+        """
         # Extract window data
         demand_window = inputs[self.demand_input_name][window_start:window_end]
         dt_hours = self.options["plant_config"]["plant"]["simulation"]["dt"] / 3600
@@ -207,7 +244,7 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
                 if rated_name in inputs:
                     flexible_production[tau] += inputs[rated_name][0]
 
-        # Get capacity bounds
+        # Get dispatchable capacity bounds
         dispatchable_capacities = []
         for i, tech in enumerate(self.dispatchable_techs):
             rated_name = self.dispatchable_rated_names[i]
@@ -217,6 +254,21 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
             dispatchable_capacities.append(cap_val)
 
         # Get storage capacities and efficiencies
+        storage_info = self._get_storage_config_info()
+
+        # Compute marginal costs
+        marginal_costs = self._compute_marginal_costs(inputs) if self.config.objective_function in ("cost_minimization", "profit_maximization") else []
+
+        return demand_window, dt_hours, fixed_production, flexible_production, dispatchable_capacities, storage_info, marginal_costs
+
+    def _get_storage_config_info(self):
+        """Extract storage capacities, efficiencies, and bounds from configs.
+
+        Returns:
+            dict: Storage configuration with keys: capacities, charge_efficiencies,
+                  discharge_efficiencies, min_soc_frac, max_soc_frac,
+                  max_charge_rate, max_discharge_rate
+        """
         storage_capacities = {}
         storage_charge_efficiencies = {}
         storage_discharge_efficiencies = {}
@@ -266,10 +318,22 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
             storage_max_charge_rate[storage_tech] = shared.get("max_charge_rate", 1e6)  # kW
             storage_max_discharge_rate[storage_tech] = shared.get("max_discharge_rate", 1e6)  # kW
 
-        # Compute marginal costs
-        marginal_costs = self._compute_marginal_costs(inputs) if self.config.objective_function in ("cost_minimization", "profit_maximization") else []
+        return {
+            'capacities': storage_capacities,
+            'charge_efficiencies': storage_charge_efficiencies,
+            'discharge_efficiencies': storage_discharge_efficiencies,
+            'min_soc_frac': storage_min_soc_frac,
+            'max_soc_frac': storage_max_soc_frac,
+            'max_charge_rate': storage_max_charge_rate,
+            'max_discharge_rate': storage_max_discharge_rate,
+        }
 
-        # Build Pyomo model
+    def _build_pyomo_model(self, window_length, dispatchable_capacities, storage_info, dt_hours):
+        """Build Pyomo ConcreteModel with variables and bounds.
+
+        Returns:
+            ConcreteModel: Initialized model with variables, bounds, and initial values
+        """
         model = ConcreteModel()
         model.t = Set(initialize=range(window_length))
 
@@ -284,15 +348,21 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
         # Demand satisfaction slack (for soft constraints)
         model.demand_satisfied = Var(model.t, within=NonNegativeReals)
         for t in model.t:
-            model.demand_satisfied[t].set_value(0.0)  # Initialize to zero
+            model.demand_satisfied[t].set_value(0.0)
 
-        # Set initial bounds for dispatchable techs
+        # Set bounds for dispatchable techs
         for t in model.t:
             for i, cap in enumerate(dispatchable_capacities):
                 model.output[t, i].setub(cap)
-                model.output[t, i].set_value(0.0)  # Initialize to zero
+                model.output[t, i].set_value(0.0)
 
-        # Set SOC bounds and charge/discharge limits
+        # Set bounds and initialize storage variables
+        storage_capacities = storage_info['capacities']
+        storage_max_soc_frac = storage_info['max_soc_frac']
+        storage_min_soc_frac = storage_info['min_soc_frac']
+        storage_max_charge_rate = storage_info['max_charge_rate']
+        storage_max_discharge_rate = storage_info['max_discharge_rate']
+
         for t in model.t:
             for i, storage_tech in enumerate(self.storage_techs):
                 cap = storage_capacities[storage_tech]
@@ -310,9 +380,18 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
                 else:
                     model.soc[t, i].set_value(0.0)
 
+        return model
+
+    def _add_model_constraints(self, model, window_length, window_start, demand_window,
+                             fixed_production, flexible_production, dispatchable_capacities,
+                             storage_info, dt_hours):
+        """Add all constraints to the Pyomo model."""
+        storage_capacities = storage_info['capacities']
+        storage_charge_efficiencies = storage_info['charge_efficiencies']
+        storage_discharge_efficiencies = storage_info['discharge_efficiencies']
+
         # Energy balance constraint
         def energy_balance_rule(m, t):
-            # Total production = demand_satisfied + storage_net_change
             disp_prod = sum(m.output[t, i] for i in range(len(self.dispatchable_techs)))
             storage_net = sum(m.charge[t, i] - m.discharge[t, i] for i in range(len(self.storage_techs)))
             return disp_prod + fixed_production[t] + flexible_production[t] == m.demand_satisfied[t] + storage_net
@@ -341,7 +420,7 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
                 if t == 0:
                     return Constraint.Skip
                 tech = self.dispatchable_techs[i]
-                ramp_pct = ramp_limits.get(tech, 100.0)  # Default 100% = no limit
+                ramp_pct = ramp_limits.get(tech, 100.0)
                 ramp_mw_per_hour = (ramp_pct / 100.0) * dispatchable_capacities[i]
                 return m.output[t, i] - m.output[t-1, i] <= ramp_mw_per_hour * dt_hours
             model.ramp_up = Constraint(model.t, range(len(self.dispatchable_techs)), rule=ramp_up_rule)
@@ -357,12 +436,12 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
 
         # Demand satisfaction constraints (hard or soft depending on mode)
         if not self.config.enable_demand_shed:
-            # Hard constraint: must meet demand
             def demand_rule(m, t):
                 return m.demand_satisfied[t] == demand_window[t]
             model.demand_rule = Constraint(model.t, rule=demand_rule)
 
-        # Set objective function
+    def _set_model_objective(self, model, window_start, demand_window, marginal_costs, inputs):
+        """Set the objective function based on configuration."""
         if self.config.objective_function == "demand_following":
             def objective_expr(m):
                 return sum((demand_window[t] - m.demand_satisfied[t])**2 for t in m.t)
@@ -371,13 +450,13 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
         elif self.config.objective_function == "cost_minimization":
             def objective_expr(m):
                 cost = 0.0
+                dt_hours = self.options["plant_config"]["plant"]["simulation"]["dt"] / 3600
                 for t in m.t:
                     abs_t = window_start + t
                     for i, tech in enumerate(self.dispatchable_techs):
                         mc = marginal_costs[i]
                         cost += mc[abs_t] * m.output[t, i] * dt_hours
 
-                # Penalty for unmet demand (if soft)
                 if self.config.enable_demand_shed:
                     demand_penalty = sum(1e6 * (demand_window[t] - m.demand_satisfied[t])**2 for t in m.t)
                     cost += demand_penalty
@@ -386,9 +465,9 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
 
         elif self.config.objective_function == "profit_maximization":
             sell_price = inputs["commodity_sell_price"]
-
             def objective_expr(m):
                 profit = 0.0
+                dt_hours = self.options["plant_config"]["plant"]["simulation"]["dt"] / 3600
                 for t in m.t:
                     abs_t = window_start + t
                     price = sell_price[abs_t]
@@ -398,6 +477,14 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
                 return profit
             model.obj = Objective(expr=objective_expr, sense=minimize)
 
+    def _solve_and_extract_results(self, model, window_length, demand_window,
+                                   fixed_production, flexible_production,
+                                   dispatchable_capacities, storage_info):
+        """Solve the Pyomo model and extract dispatch decisions.
+
+        Returns:
+            dict: dispatch_decisions mapping tech_name -> array of outputs for window
+        """
         # Solve using Pyomo solver
         solver = self._get_pyomo_solver()
         solve_successful = False
@@ -427,16 +514,14 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
         for i, tech in enumerate(self.dispatchable_techs):
             outputs = np.array([value(model.output[t, i]) for t in model.t])
             dispatch_decisions[tech] = outputs
-            # Track last output for ramping
             self.last_output_per_tech[tech] = outputs[-1]
 
         for i, tech in enumerate(self.storage_techs):
             outputs = np.array([value(model.discharge[t, i] - model.charge[t, i]) for t in model.t])
             dispatch_decisions[tech] = outputs
-            # Track last SOC for next window
             self.last_soc_per_tech[tech] = value(model.soc[window_length-1, i])
 
-        return model, dispatch_decisions
+        return dispatch_decisions
 
     def _solve_optimization_greedy(self, model, demand_window, fixed_production, flexible_production,
                                    dispatchable_capacities, window_length):

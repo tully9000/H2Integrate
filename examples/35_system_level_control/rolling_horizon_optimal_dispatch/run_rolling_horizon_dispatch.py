@@ -46,6 +46,16 @@ for case, config_file in cases.items():
     h2i.run()
     h2i.post_process()
 
+
+    slc_inputs = {k:v["val"] for (k, v) in h2i.prob.model.plant.system_level_controller.list_inputs(out_stream=None)}
+    slc_outputs = {k:v["val"] for (k, v) in h2i.prob.model.plant.system_level_controller.list_outputs(out_stream=None)}
+
+
+
+
+
+
+
     has_battery = "battery" in h2i.technology_config["technologies"]
 
     wind_out = h2i.prob.get_val("plant.wind.electricity_out")[:n_hours]
@@ -100,7 +110,7 @@ for case, config_file in cases.items():
         ax.grid(True, alpha=0.3)
 
     fig.tight_layout()
-    fig.savefig(f"rho_dispatch_results_{case}.png", dpi=150)
+    fig.savefig(f"{Path(__file__).parent / "plots"}/rho_dispatch_results_{case}.png", dpi=150)
     print(f"✓ Saved plot: rho_dispatch_results_{case}.png")
 
 print("\n✓ All rolling horizon dispatch scenarios complete!")
