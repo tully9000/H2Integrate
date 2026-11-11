@@ -638,6 +638,19 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
             )
 
 
+    def _has_time_index(self, component, time_set):
+        """Check if component's index set includes time dimension."""
+        if not component.is_indexed():
+            return False
+        for entry in component:
+            if isinstance(entry, tuple):
+                if any(idx in time_set for idx in entry):
+                    return True
+            else:
+                if entry in time_set:
+                    return True
+        return False
+
     def _debug_plotting(self, model):
         """Orchestrate debug plotting of Pyomo model for inspection."""
         self._debug_plotting_summary(model)
@@ -712,7 +725,7 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
 
         axes[-1].set_xlabel('Time Step')
         fig.tight_layout()
-        plt.show()
+        # plt.show()
 
     def _debug_plotting_components(self, model):
         """Inspect and plot time-indexed model components (variables, parameters, constraints).
@@ -732,60 +745,104 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
         scalar_constrs = {}
 
         # Inspect parameters
-        for param in model.component_data_objects(ctype=Param, active=True):
+        for param in model.component_objects(ctype=Param, active=True):
             if param.is_indexed():
-                # Check if any index dimension matches time set
-                indices = param.index_set()
-                if hasattr(indices, '__iter__'):
-                    is_time_indexed = any(idx in time_set for idx in indices)
-                    if is_time_indexed:
-                        time_indexed_params[param.name] = param
-                    else:
-                        scalar_params[param.name] = value(param)
+                if self._has_time_index(param, time_set):
+                    time_indexed_params[param.name] = param
+                else:
+                    # Extract scalar values from indexed param
+                    for key in param:
+                        scalar_params[f"{param.name}[{key}]"] = value(param[key])
             else:
                 scalar_params[param.name] = value(param)
 
         # Inspect variables
-        for var in model.component_data_objects(ctype=Var, active=True):
+        for var in model.component_objects(ctype=Var, active=True):
             if var.is_indexed():
-                indices = var.index_set()
-                if hasattr(indices, '__iter__'):
-                    is_time_indexed = any(idx in time_set for idx in indices)
-                    if is_time_indexed:
-                        time_indexed_vars[var.name] = var
-                    else:
-                        scalar_vars[var.name] = value(var)
+                if self._has_time_index(var, time_set):
+                    time_indexed_vars[var.name] = var
+                else:
+                    # Extract scalar values from indexed var
+                    for key in var:
+                        scalar_vars[f"{var.name}[{key}]"] = value(var[key])
             else:
                 scalar_vars[var.name] = value(var)
 
         # Inspect constraints
-        for constr in model.component_data_objects(ctype=Constraint, active=True):
+        for constr in model.component_objects(ctype=Constraint, active=True):
             if constr.is_indexed():
-                indices = constr.index_set()
-                if hasattr(indices, '__iter__'):
-                    is_time_indexed = any(idx in time_set for idx in indices)
-                    if is_time_indexed:
-                        time_indexed_constrs[constr.name] = constr
-                    else:
-                        scalar_constrs[constr.name] = constr
+                if self._has_time_index(constr, time_set):
+                    time_indexed_constrs[constr.name] = constr
+                else:
+                    # Extract scalar constraint info
+                    for key in constr:
+                        scalar_constrs[f"{constr.name}[{key}]"] = True
             else:
-                scalar_constrs[constr.name] = constr
+                scalar_constrs[constr.name] = True
 
         # Extract time series data for plotting
         time_param_data = {}
         for name, param in time_indexed_params.items():
-            time_param_data[name] = np.array([value(param[t]) for t in time_steps if t in param])
+            data = []
+            for t in time_steps:
+                try:
+                    # Try 1D indexing (just time)
+                    data.append(value(param[t]))
+                except:
+                    try:
+                        # Try finding entries with t as first index
+                        for key in param:
+                            if isinstance(key, tuple) and key[0] == t:
+                                data.append(value(param[key]))
+                                break
+                        else:
+                            data.append(np.nan)
+                    except:
+                        data.append(np.nan)
+            if any(not np.isnan(d) for d in data):
+                time_param_data[name] = np.array(data)
 
         time_var_data = {}
         for name, var in time_indexed_vars.items():
-            time_var_data[name] = np.array([value(var[t]) for t in time_steps if t in var])
+            data = []
+            for t in time_steps:
+                try:
+                    # Try 1D indexing (just time)
+                    data.append(value(var[t]))
+                except:
+                    try:
+                        # Try finding entries with t as first index
+                        for key in var:
+                            if isinstance(key, tuple) and key[0] == t:
+                                data.append(value(var[key]))
+                                break
+                        else:
+                            data.append(np.nan)
+                    except:
+                        data.append(np.nan)
+            if any(not np.isnan(d) for d in data):
+                time_var_data[name] = np.array(data)
 
         time_constr_data = {}
         for name, constr in time_indexed_constrs.items():
-            try:
-                time_constr_data[name] = np.array([value(constr[t].body) for t in time_steps if t in constr])
-            except:
-                pass
+            data = []
+            for t in time_steps:
+                try:
+                    # Try 1D indexing (just time)
+                    data.append(value(constr[t].body))
+                except:
+                    try:
+                        # Try finding entries with t as first index
+                        for key in constr:
+                            if isinstance(key, tuple) and key[0] == t:
+                                data.append(value(constr[key].body))
+                                break
+                        else:
+                            data.append(np.nan)
+                    except:
+                        data.append(np.nan)
+            if any(not np.isnan(d) for d in data):
+                time_constr_data[name] = np.array(data)
 
         # Create subplots
         fig, axes = plt.subplots(3, 1, figsize=(12, 9), sharex=True)
