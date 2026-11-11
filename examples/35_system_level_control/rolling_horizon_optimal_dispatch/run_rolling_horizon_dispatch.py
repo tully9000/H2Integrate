@@ -31,10 +31,10 @@ from h2integrate.core.h2integrate_model import H2IntegrateModel
 script_dir = Path(__file__).parent
 
 cases = {
-    "cost_min_battery": script_dir / "wind_ng_battery_demand_cost_min.yaml",
-    "cost_minimization": script_dir / "wind_ng_demand_cost_min.yaml",
     "demand_following_battery": script_dir / "wind_ng_battery_demand_following.yaml",
-    "profit_maximization": script_dir / "wind_ng_demand_profit_max.yaml",
+    # "cost_min_battery": script_dir / "wind_ng_battery_demand_cost_min.yaml",
+    # "cost_minimization": script_dir / "wind_ng_demand_cost_min.yaml",
+    # "profit_maximization": script_dir / "wind_ng_demand_profit_max.yaml",
 }
 
 # Plot the first 168 hours (1 week)
@@ -69,27 +69,37 @@ for case, config_file in cases.items():
     n_rows = 3 if has_battery else 2
     fig, axes = plt.subplots(n_rows, 1, figsize=(12, 2 + 8 * n_rows / 3), sharex=True)
 
-    # Stacked bar chart: wind + battery discharge + NG = total supply
-    axes[0].bar(hours, wind_out, width=1.0, color="tab:blue", label="Wind", align="edge")
+    # Stacked fill_between: wind + battery discharge + NG = total supply
+    axes[0].fill_between(hours, 0, wind_out, alpha=0.5, color="tab:blue", label="Wind")
+
     if has_battery:
-        axes[0].bar(
+        axes[0].fill_between(
             hours,
-            batt_discharge,
-            width=1.0,
-            bottom=wind_out,
+            wind_out,
+            wind_out + batt_discharge,
+            alpha=0.5,
             color="tab:purple",
             label="Battery Discharge",
-            align="edge",
         )
-    axes[0].bar(
+
+    axes[0].fill_between(
         hours,
-        ng_out,
-        width=1.0,
-        bottom=wind_out + batt_discharge,
+        wind_out + batt_discharge,
+        wind_out + batt_discharge + ng_out,
+        alpha=0.5,
         color="tab:orange",
         label="Natural Gas",
-        align="edge",
     )
+
+    axes[0].fill_between(
+        hours,
+        wind_out + batt_discharge + ng_out,
+        wind_out + batt_discharge + ng_out + curtailed,
+        alpha=0.5,
+        color="tab:red",
+        label="Curtailment",
+    )
+
     axes[0].plot(hours, demand, color="black", linewidth=1.5, linestyle="--", label="Demand")
     axes[0].set_ylabel("Power (kW)")
     axes[0].set_title(f"Rolling Horizon Optimal Dispatch ({case.replace('_', ' ').title()}): First 168 Hours")
@@ -107,8 +117,8 @@ for case, config_file in cases.items():
         ax.grid(True, alpha=0.3)
 
     fig.tight_layout()
-    fig.savefig(f"{Path(__file__).parent / 'plots'}/rho_dispatch_results_{case}.png", dpi=150)
+    # fig.savefig(f"{Path(__file__).parent / 'plots'}/rho_dispatch_results_{case}.png", dpi=150)
     print(f"✓ Saved plot: rho_dispatch_results_{case}.png")
 
 print("\n✓ All rolling horizon dispatch scenarios complete!")
-plt.show()
+# plt.show()
