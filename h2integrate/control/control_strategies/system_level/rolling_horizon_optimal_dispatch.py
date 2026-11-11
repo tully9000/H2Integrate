@@ -28,6 +28,8 @@ class RollingHorizonOptimalDispatchConfig(BaseConfig):
             Default: False (meet demand is hard constraint).
         ramp_rate_limits_pct_per_hour (dict): Tech-specific ramp limits as percent
             of rated capacity per hour. Example: {"ng1": 10.0, "ng2": 20.0}.
+        cost_per_tech (dict): Marginal cost specification per dispatchable tech.
+            Values can be numeric ($/kWh), "buy_price", "VarOpEx", or "feedstock".
     """
 
     objective_function: str = field(default="demand_following")
@@ -37,6 +39,7 @@ class RollingHorizonOptimalDispatchConfig(BaseConfig):
     enable_ramping_constraints: bool = field(default=False)
     enable_demand_shed: bool = field(default=False)
     ramp_rate_limits_pct_per_hour: dict = field(factory=dict)
+    cost_per_tech: dict = field(factory=dict)
 
 
 @register
@@ -82,6 +85,10 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
         else:
             self.horizon_timesteps = self.n_timesteps
 
+        # For objectives that require costs, set up marginal cost inputs
+        if config.objective_function in ("cost_minimization", "profit_maximization"):
+            self._setup_marginal_costs()
+
         # For profit maximization: add commodity sell price input
         if config.objective_function == "profit_maximization":
             self.add_input(
@@ -91,11 +98,6 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
                 units=f"USD/({self.commodity_rate_units}*h)",
                 desc=f"Sell price per unit of {self.commodity}",
             )
-            # Set up marginal costs for all dispatchable techs
-            self._setup_marginal_costs()
-        elif config.objective_function == "cost_minimization":
-            # Set up marginal costs for all dispatchable techs
-            self._setup_marginal_costs()
 
     def compute(self, inputs, outputs):
         """Solve rolling horizon optimization and extract first-window dispatch.
@@ -175,20 +177,42 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
                 cap_val = cap_val.item()
             dispatchable_capacities.append(cap_val)
 
+        # Compute marginal costs early (needed for both initial guess and objective)
+        marginal_costs = self._compute_marginal_costs(inputs) if self.config.objective_function in ("cost_minimization", "profit_maximization") else []
+
         # Decision variables: [disp_tech_1_t1, disp_tech_1_t2, ..., storage_tech_1_t1, ...]
         n_disp_vars = len(self.dispatchable_techs) * window_length
         n_storage_vars = len(self.storage_techs) * window_length
         n_vars = n_disp_vars + n_storage_vars
 
-        # Initial guess: try to meet demand with dispatchable techs
+        # Initial guess: try to meet demand with dispatchable techs, preferring cheaper ones if available
         x0 = np.zeros(n_vars)
-        for t in range(window_length):
-            # Dispatchable: try to meet remaining demand
-            remaining = demand_window[t] - fixed_production[t] - flexible_production[t]
-            for i, tech in enumerate(self.dispatchable_techs):
-                var_idx = i * window_length + t
-                if remaining > 0 and len(dispatchable_capacities) > i:
-                    x0[var_idx] = min(remaining / len(self.dispatchable_techs), dispatchable_capacities[i])
+
+        # For cost minimization, sort techs by cost and dispatch in order
+        if self.config.objective_function == "cost_minimization" and marginal_costs:
+            # Get mean cost per tech and sort
+            mean_costs = [marginal_costs[i].mean() for i in range(len(self.dispatchable_techs))]
+            cost_order = sorted(range(len(self.dispatchable_techs)), key=lambda i: mean_costs[i])
+
+            for t in range(window_length):
+                remaining = demand_window[t] - fixed_production[t] - flexible_production[t]
+                # Dispatch in cost order
+                for idx in cost_order:
+                    if remaining <= 1e-6:
+                        break
+                    cap = dispatchable_capacities[idx]
+                    dispatch = min(remaining, cap)
+                    var_idx = idx * window_length + t
+                    x0[var_idx] = dispatch
+                    remaining -= dispatch
+        else:
+            # Default: split equally
+            for t in range(window_length):
+                remaining = demand_window[t] - fixed_production[t] - flexible_production[t]
+                for i in range(len(self.dispatchable_techs)):
+                    var_idx = i * window_length + t
+                    if remaining > 0 and len(dispatchable_capacities) > i:
+                        x0[var_idx] = min(remaining / len(self.dispatchable_techs), dispatchable_capacities[i])
 
         # Bounds: [0, capacity] for all variables
         bounds = []
@@ -214,12 +238,25 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
                     total_error += error ** 2
 
                 return total_error
-        else:
-            # Phase B+: placeholder
+
+        elif self.config.objective_function == "cost_minimization":
+            def objective(x):
+                return self._build_cost_minimization_objective(
+                    demand_window, x, window_start, window_length,
+                    fixed_production, flexible_production, inputs
+                )
+
+        elif self.config.objective_function == "profit_maximization":
+            # Phase C: placeholder
             def objective(x):
                 return 0.0
 
-        # Constraints: production >= 0, capacity bounds handled by scipy bounds
+        else:
+            raise ValueError(f"Unknown objective_function: {self.config.objective_function}")
+            def objective(x):
+                return 0.0
+
+        # No explicit constraints; energy balance is enforced via penalty in objective
         constraints = []
 
         # Solve
@@ -242,10 +279,59 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
 
         return None, dispatch_decisions
 
-    def _build_cost_minimization_objective(self, model, inputs, window_start, window_length):
-        """Build cost minimization objective for Pyomo model (Phase B feature)."""
-        # Placeholder: will be implemented in Phase B
-        raise NotImplementedError("Cost minimization objective is Phase B work.")
+    def _build_cost_minimization_objective(self, demand_window, x, window_start, window_length,
+                                           fixed_production, flexible_production, inputs):
+        """Build objective for cost minimization with demand satisfaction penalty.
+
+        Minimizes: ∑_t [∑_i marginal_cost[i,t] * output[i,t] + 1e6 * demand_error[t]]
+
+        The large penalty coefficient (1e6) ensures demand is met while still preferring cheaper techs.
+
+        Args:
+            demand_window: Demand profile for this window
+            x: Optimization variable vector (dispatchable outputs, then storage)
+            window_start: Starting timestep
+            window_length: Window length in timesteps
+            fixed_production: Pre-computed fixed tech production
+            flexible_production: Pre-computed flexible tech production
+            inputs: OpenMDAO inputs dict
+
+        Returns:
+            float: Objective value
+        """
+        # Get marginal costs for each dispatchable tech (pre-computed in setup)
+        marginal_costs = self._compute_marginal_costs(inputs)
+
+        n_disp_vars = len(self.dispatchable_techs) * window_length
+        total_cost = 0.0
+        demand_penalty = 0.0
+        penalty_weight = 1e6  # Large penalty to force demand satisfaction
+
+        for t in range(window_length):
+            abs_t = window_start + t
+
+            # Sum dispatchable production
+            disp_prod = sum(x[i * window_length + t] for i in range(len(self.dispatchable_techs)))
+
+            # Sum storage production
+            storage_prod = sum(x[n_disp_vars + i * window_length + t] for i in range(len(self.storage_techs)))
+
+            # Total production
+            total_prod = disp_prod + storage_prod + fixed_production[t] + flexible_production[t]
+
+            # Demand error
+            error = demand_window[t] - total_prod
+            demand_penalty += penalty_weight * (max(error, 0) ** 2)  # Penalize under-production
+
+            # Add marginal costs for this timestep
+            dt_hours = self.options["plant_config"]["plant"]["simulation"]["dt"] / 3600
+            for i, tech in enumerate(self.dispatchable_techs):
+                mc = marginal_costs[i]  # shape (n_timesteps,)
+                output = x[i * window_length + t]
+                cost_contribution = mc[abs_t] * output * dt_hours
+                total_cost += cost_contribution
+
+        return total_cost + demand_penalty
 
     def _build_profit_maximization_objective(self, model, inputs, window_start, window_length):
         """Build profit maximization objective for Pyomo model (Phase C feature)."""
