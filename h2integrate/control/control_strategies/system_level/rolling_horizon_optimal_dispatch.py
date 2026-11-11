@@ -177,7 +177,7 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
             inputs, window_start, window_end, window_length
         )
 
-        if self.iter_count < 5:
+        if self.iter_count < 5 and False:
             self._debug_plotting(model)
 
         # Extract dispatch from first timestep and write to outputs
@@ -212,6 +212,15 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
         model = self._build_pyomo_model(
             window_length, dispatchable_capacities, storage_info, dt_hours
         )
+
+        # Populate fixed tech output parameters
+        for fixed_tech in self.fixed_techs:
+            param_name = f"fixed_out_{fixed_tech}"
+            if hasattr(model, param_name):
+                param = getattr(model, param_name)
+                if fixed_tech in fixed_production:
+                    for t in range(window_length):
+                        param[t].set_value(fixed_production[fixed_tech][t])
 
         # Populate flexible tech output parameters
         for i, flex_tech in enumerate(self.flexible_techs):
@@ -252,8 +261,14 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
         demand_window = inputs[self.demand_input_name][window_start:window_end]
         dt_hours = self.options["plant_config"]["plant"]["simulation"]["dt"] / 3600
 
-        # Pre-compute fixed production
-        fixed_production = np.zeros(window_length)
+        # Pre-compute fixed production by technology
+        fixed_production = {}
+        for fixed_tech in self.fixed_techs:
+            in_name = f"{fixed_tech}_{self.commodity}_out"
+            if in_name in inputs:
+                fixed_production[fixed_tech] = inputs[in_name][window_start:window_end]
+            else:
+                fixed_production[fixed_tech] = np.zeros(window_length)
 
         # Extract flexible tech uncurtailed outputs (time-varying)
         flexible_production = {}
@@ -263,13 +278,6 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
                 flexible_production[flexible_tech] = inputs[flex_input_name][window_start:window_end]
             else:
                 flexible_production[flexible_tech] = np.zeros(window_length)
-
-        for tau in range(window_length):
-            abs_tau = window_start + tau
-            for fixed_tech in self.fixed_techs:
-                in_name = f"{fixed_tech}_{self.commodity}_out"
-                if in_name in inputs:
-                    fixed_production[tau] += inputs[in_name][abs_tau]
 
         # Get dispatchable capacity bounds (as dict keyed by tech name)
         dispatchable_capacities = {}
@@ -368,6 +376,11 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
             ConcreteModel: Initialized model with variables, bounds, and initial values
         """
         model = ConcreteModel()
+
+        # ======================================================================
+        #                                  Sets                                 
+        # ======================================================================
+
         model.t = Set(initialize=range(window_length))
 
         # Technology index sets (strings instead of numeric indices)
@@ -376,6 +389,10 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
         model.dispatchable_techs = Set(initialize=self.dispatchable_techs)
         model.storage_techs = Set(initialize=self.storage_techs)
         model.feedstock_techs = Set(initialize=self.feedstock_comps)
+
+        # ======================================================================
+        #                                  Variables                                 
+        # ======================================================================
 
         # Dispatchable output variables indexed by time and tech name
         model.output = Var(model.t, model.dispatchable_techs, within=NonNegativeReals)
@@ -393,9 +410,21 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
         for t in model.t:
             model.demand_satisfied[t].set_value(0.0)
 
+        # ======================================================================
+        #                                  Parameters
+        # ======================================================================
+
+        # Fixed tech output parameters (deterministic renewable production)
+        for fixed_tech in self.fixed_techs:
+            setattr(model, f"fixed_out_{fixed_tech}", Param(model.t, mutable=True, default=0.0))
+
         # Flexible tech uncurtailed output parameters
         for flex_tech in self.flexible_techs:
             setattr(model, f"flex_out_{flex_tech}", Param(model.t, mutable=True, default=0.0))
+
+        # ======================================================================
+        #                                  Bounds                                 
+        # ======================================================================
 
         # Set bounds for dispatchable techs using tech names
         for t in model.t:
@@ -445,11 +474,19 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
 
         # Energy balance constraint
         def energy_balance_rule(m, t):
+            # Dispatchable production
             disp_prod = sum(m.output[t, tech] for tech in m.dispatchable_techs)
+
+            # Fixed tech production (deterministic)
+            fixed_prod = sum(getattr(m, f"fixed_out_{tech}")[t] for tech in m.fixed_techs)
+
+            # Storage net production
             storage_net = sum(m.charge[t, tech] - m.discharge[t, tech] for tech in m.storage_techs)
+
             # Sum flexible tech output variables (can be curtailed)
             flex_prod = sum(m.flex_output[t, tech] for tech in m.flexible_techs)
-            return disp_prod + fixed_production[t] + flex_prod == m.demand_satisfied[t] + storage_net
+
+            return disp_prod + fixed_prod + flex_prod == m.demand_satisfied[t] + storage_net
         model.energy_balance = Constraint(model.t, rule=energy_balance_rule)
 
         # Flexible tech curtailment constraint: output ≤ uncurtailed availability
@@ -596,11 +633,15 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
         Sets Pyomo variables to feasible values without optimization.
         """
         for t in range(window_length):
+            # Calculate fixed production for this timestep
+            fixed_prod = sum(fixed_production.get(tech, np.zeros(window_length))[t]
+                            for tech in self.fixed_techs)
+
             # Calculate flexible production for this timestep
             flex_prod = sum(flexible_production.get(tech, np.zeros(window_length))[t]
                            for tech in self.flexible_techs)
 
-            remaining = demand_window[t] - fixed_production[t] - flex_prod
+            remaining = demand_window[t] - fixed_prod - flex_prod
 
             # Set flexible tech outputs to their full uncurtailed availability
             for tech in self.flexible_techs:
