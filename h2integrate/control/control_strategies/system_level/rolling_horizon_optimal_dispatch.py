@@ -638,6 +638,10 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
 
 
     def _debug_plotting(self, model):
+        """Orchestrate debug plotting of Pyomo model for inspection."""
+        self._debug_plotting_summary(model)
+
+    def _debug_plotting_summary(self, model):
         """Extract and plot Pyomo model variables and constraints for debugging.
 
         Extracts time series from model variables and creates matplotlib plots
