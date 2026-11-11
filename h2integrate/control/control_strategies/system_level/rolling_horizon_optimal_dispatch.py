@@ -7,6 +7,7 @@ from pyomo.environ import (
     ConcreteModel,
     Set,
     Var,
+    Param,
     Constraint,
     Objective,
     NonNegativeReals,
@@ -640,6 +641,7 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
     def _debug_plotting(self, model):
         """Orchestrate debug plotting of Pyomo model for inspection."""
         self._debug_plotting_summary(model)
+        self._debug_plotting_components(model)
 
     def _debug_plotting_summary(self, model):
         """Extract and plot Pyomo model variables and constraints for debugging.
@@ -711,3 +713,142 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
         axes[-1].set_xlabel('Time Step')
         fig.tight_layout()
         plt.show()
+
+    def _debug_plotting_components(self, model):
+        """Inspect and plot time-indexed model components (variables, parameters, constraints).
+
+        Creates three subplots for time-indexed parameters, variables, and constraints.
+        Scalar components are printed as summaries instead of plotted.
+        """
+        time_steps = sorted(list(model.t))
+        time_set = set(time_steps)
+
+        # Collect time-indexed and scalar components
+        time_indexed_params = {}
+        time_indexed_vars = {}
+        time_indexed_constrs = {}
+        scalar_params = {}
+        scalar_vars = {}
+        scalar_constrs = {}
+
+        # Inspect parameters
+        for param in model.component_data_objects(ctype=Param, active=True):
+            if param.is_indexed():
+                # Check if any index dimension matches time set
+                indices = param.index_set()
+                if hasattr(indices, '__iter__'):
+                    is_time_indexed = any(idx in time_set for idx in indices)
+                    if is_time_indexed:
+                        time_indexed_params[param.name] = param
+                    else:
+                        scalar_params[param.name] = value(param)
+            else:
+                scalar_params[param.name] = value(param)
+
+        # Inspect variables
+        for var in model.component_data_objects(ctype=Var, active=True):
+            if var.is_indexed():
+                indices = var.index_set()
+                if hasattr(indices, '__iter__'):
+                    is_time_indexed = any(idx in time_set for idx in indices)
+                    if is_time_indexed:
+                        time_indexed_vars[var.name] = var
+                    else:
+                        scalar_vars[var.name] = value(var)
+            else:
+                scalar_vars[var.name] = value(var)
+
+        # Inspect constraints
+        for constr in model.component_data_objects(ctype=Constraint, active=True):
+            if constr.is_indexed():
+                indices = constr.index_set()
+                if hasattr(indices, '__iter__'):
+                    is_time_indexed = any(idx in time_set for idx in indices)
+                    if is_time_indexed:
+                        time_indexed_constrs[constr.name] = constr
+                    else:
+                        scalar_constrs[constr.name] = constr
+            else:
+                scalar_constrs[constr.name] = constr
+
+        # Extract time series data for plotting
+        time_param_data = {}
+        for name, param in time_indexed_params.items():
+            time_param_data[name] = np.array([value(param[t]) for t in time_steps if t in param])
+
+        time_var_data = {}
+        for name, var in time_indexed_vars.items():
+            time_var_data[name] = np.array([value(var[t]) for t in time_steps if t in var])
+
+        time_constr_data = {}
+        for name, constr in time_indexed_constrs.items():
+            try:
+                time_constr_data[name] = np.array([value(constr[t].body) for t in time_steps if t in constr])
+            except:
+                pass
+
+        # Create subplots
+        fig, axes = plt.subplots(3, 1, figsize=(12, 9), sharex=True)
+
+        # Plot 1: Time-indexed parameters
+        if time_param_data:
+            for name, data in time_param_data.items():
+                axes[0].plot(time_steps, data, marker='o', label=name, linewidth=2)
+            axes[0].set_ylabel('Value')
+            axes[0].set_title('Time-Indexed Parameters')
+            axes[0].legend()
+            axes[0].grid(True, alpha=0.3)
+        else:
+            axes[0].text(0.5, 0.5, 'No time-indexed parameters', ha='center', va='center',
+                        transform=axes[0].transAxes, fontsize=12)
+            axes[0].set_title('Time-Indexed Parameters')
+
+        # Plot 2: Time-indexed variables
+        if time_var_data:
+            for name, data in time_var_data.items():
+                axes[1].plot(time_steps, data, marker='s', label=name, linewidth=2)
+            axes[1].set_ylabel('Value')
+            axes[1].set_title('Time-Indexed Variables')
+            axes[1].legend()
+            axes[1].grid(True, alpha=0.3)
+        else:
+            axes[1].text(0.5, 0.5, 'No time-indexed variables', ha='center', va='center',
+                        transform=axes[1].transAxes, fontsize=12)
+            axes[1].set_title('Time-Indexed Variables')
+
+        # Plot 3: Time-indexed constraint bodies
+        if time_constr_data:
+            for name, data in time_constr_data.items():
+                axes[2].plot(time_steps, data, marker='^', label=name, linewidth=2)
+            axes[2].set_ylabel('Constraint Body Value')
+            axes[2].set_title('Time-Indexed Constraint Bodies')
+            axes[2].legend()
+            axes[2].grid(True, alpha=0.3)
+        else:
+            axes[2].text(0.5, 0.5, 'No time-indexed constraints', ha='center', va='center',
+                        transform=axes[2].transAxes, fontsize=12)
+            axes[2].set_title('Time-Indexed Constraint Bodies')
+
+        axes[-1].set_xlabel('Time Step')
+        fig.tight_layout()
+        plt.show()
+
+        # Print scalar summaries
+        print("\n" + "="*60)
+        print("SCALAR COMPONENTS SUMMARY")
+        print("="*60)
+
+        if scalar_params:
+            print("\nScalar Parameters:")
+            for name, val in scalar_params.items():
+                print(f"  {name} = {val}")
+
+        if scalar_vars:
+            print("\nScalar Variables:")
+            for name, val in scalar_vars.items():
+                print(f"  {name} = {val}")
+
+        if scalar_constrs:
+            print("\nScalar Constraints:")
+            for name in scalar_constrs.keys():
+                print(f"  {name}")
