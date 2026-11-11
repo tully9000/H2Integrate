@@ -674,6 +674,9 @@ class H2IntegrateModel:
            - **Flexible / dispatchable / storage techs**: Both the commodity output
              (``{tech_name}.{commodity}_out``) and rated production
              (``{tech_name}.rated_{commodity}_production``) are connected as controller inputs.
+             For ``RollingHorizonOptimalDispatch``, flexible techs additionally have their
+             uncurtailed output (``{tech_name}.uncurtailed_{commodity}_out``) connected to
+             allow the optimizer to curtail renewable generation.
              The controller's per-tech ``{tech_name}_{commodity}_set_point`` output is then
              connected to the tech group's ``{commodity}_set_point`` input. Every controlled
              tech group is expected to expose this input — either via a user-defined
@@ -786,6 +789,14 @@ class H2IntegrateModel:
                 self.plant.connect(
                     f"{tech_name}.storage_duration",
                     f"system_level_controller.{tech_name}_{commodity}_storage_duration",
+                )
+
+            # Flexible tech: connect uncurtailed output for RollingHorizonOptimalDispatch
+            if (slc_topology["tech_control_classifiers"][tech_name] == "flexible" and
+                strategy_name == "RollingHorizonOptimalDispatch"):
+                self.plant.connect(
+                    f"{tech_name}.uncurtailed_{commodity}_out",
+                    f"system_level_controller.{tech_name}_uncurtailed_{commodity}_out",
                 )
 
             # Every controlled tech group exposes a ``{commodity}_set_point``
