@@ -2,6 +2,7 @@ import numpy as np
 import warnings
 from attrs import field, define
 import openmdao.api as om
+import matplotlib.pyplot as plt
 from pyomo.environ import (
     ConcreteModel,
     Set,
@@ -165,6 +166,9 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
         model, dispatch_decisions = self._solve_optimization(
             inputs, window_start, window_end, window_length
         )
+
+        if self.iter_count < 5:
+            self._debug_plotting(model)
 
         # Extract dispatch from first timestep and write to outputs
         self._extract_and_output_dispatch(dispatch_decisions, window_start, simulation_range, outputs)
@@ -631,3 +635,75 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
             outputs[set_point_name][simulation_range] = np.full(
                 self.n_timesteps_window, tau_0_dispatch[tech]
             )
+
+
+    def _debug_plotting(self, model):
+        """Extract and plot Pyomo model variables and constraints for debugging.
+
+        Extracts time series from model variables and creates matplotlib plots
+        showing dispatchable outputs, storage dynamics, and demand satisfaction.
+        """
+        # Extract time indices
+        time_steps = sorted(list(model.t))
+        n_steps = len(time_steps)
+
+        # Extract dispatchable tech outputs
+        disp_outputs = {}
+        for i, tech in enumerate(self.dispatchable_techs):
+            disp_outputs[tech] = np.array([value(model.output[t, i]) for t in time_steps])
+
+        # Extract storage state and flows
+        storage_soc = {}
+        storage_charge = {}
+        storage_discharge = {}
+        for i, tech in enumerate(self.storage_techs):
+            storage_soc[tech] = np.array([value(model.soc[t, i]) for t in time_steps])
+            storage_charge[tech] = np.array([value(model.charge[t, i]) for t in time_steps])
+            storage_discharge[tech] = np.array([value(model.discharge[t, i]) for t in time_steps])
+
+        # Extract demand satisfaction
+        demand_satisfied = np.array([value(model.demand_satisfied[t]) for t in time_steps])
+
+        # Extract constraint residuals
+        energy_balance_resid = []
+        if hasattr(model, 'energy_balance'):
+            for t in time_steps:
+                resid = value(model.energy_balance[t].body - model.energy_balance[t].lower)
+                energy_balance_resid.append(resid)
+        energy_balance_resid = np.array(energy_balance_resid) if energy_balance_resid else None
+
+        # Create figure with subplots
+        n_rows = 2 + (1 if self.storage_techs else 0)
+        fig, axes = plt.subplots(n_rows, 1, figsize=(12, 3 * n_rows), sharex=True)
+
+        # Plot 1: Dispatchable tech outputs
+        for tech, outputs in disp_outputs.items():
+            axes[0].plot(time_steps, outputs, marker='o', label=tech, linewidth=2)
+        axes[0].set_ylabel('Power (kW)')
+        axes[0].set_title('Dispatchable Technology Outputs')
+        axes[0].legend()
+        axes[0].grid(True, alpha=0.3)
+
+        # Plot 2: Demand satisfaction
+        axes[1].bar(time_steps, demand_satisfied, width=0.8, label='Satisfied', alpha=0.7)
+        axes[1].set_ylabel('Power (kW)')
+        axes[1].set_title('Demand Satisfaction')
+        axes[1].legend()
+        axes[1].grid(True, alpha=0.3)
+
+        # Plot 3: Storage dynamics (if storage exists)
+        if self.storage_techs:
+            for tech in self.storage_techs:
+                axes[2].plot(time_steps, storage_soc[tech], marker='s', label=f'{tech} SOC', linewidth=2)
+            axes[2].plot(time_steps, storage_charge.get(list(self.storage_techs)[0], 0),
+                        marker='^', label='Charge', linestyle='--', linewidth=1.5)
+            axes[2].plot(time_steps, storage_discharge.get(list(self.storage_techs)[0], 0),
+                        marker='v', label='Discharge', linestyle='--', linewidth=1.5)
+            axes[2].set_ylabel('Energy (kWh) / Power (kW)')
+            axes[2].set_title('Storage State of Charge and Flows')
+            axes[2].legend()
+            axes[2].grid(True, alpha=0.3)
+
+        axes[-1].set_xlabel('Time Step')
+        fig.tight_layout()
+        plt.show()
