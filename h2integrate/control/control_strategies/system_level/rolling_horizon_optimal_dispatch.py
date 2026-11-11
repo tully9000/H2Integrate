@@ -133,7 +133,16 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
                 desc=f"Sell price per unit of {self.commodity}",
             )
 
-        # Phase D: Initialize window state tracking for SOC continuity
+        # Add inputs for flexible technology uncurtailed outputs
+        for flex_tech in self.flexible_techs:
+            flex_input_name = f"{flex_tech}_uncurtailed_{self.commodity}_out"
+            self.add_input(
+                flex_input_name,
+                val=np.zeros(self.n_timesteps),
+                shape=self.n_timesteps,
+                units=self.commodity_rate_units,
+                desc=f"Uncurtailed {self.commodity} output from {flex_tech}",
+            )
         self.last_soc_per_tech = {}  # {storage_tech: soc_value}
         self.last_output_per_tech = {}  # {dispatchable_tech: output_value}
 
@@ -204,6 +213,15 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
             window_length, dispatchable_capacities, storage_info, dt_hours
         )
 
+        # Populate flexible tech output parameters
+        for i, flex_tech in enumerate(self.flexible_techs):
+            param_name = f"flex_out_{flex_tech}"
+            if hasattr(model, param_name):
+                param = getattr(model, param_name)
+                if flex_tech in flexible_production:
+                    for t in range(window_length):
+                        param[t].set_value(flexible_production[flex_tech][t])
+
         # Add all constraints to model
         self._add_model_constraints(
             model, window_length, window_start, demand_window,
@@ -234,9 +252,17 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
         demand_window = inputs[self.demand_input_name][window_start:window_end]
         dt_hours = self.options["plant_config"]["plant"]["simulation"]["dt"] / 3600
 
-        # Pre-compute fixed and flexible production
+        # Pre-compute fixed production
         fixed_production = np.zeros(window_length)
-        flexible_production = np.zeros(window_length)
+
+        # Extract flexible tech uncurtailed outputs (time-varying)
+        flexible_production = {}
+        for flexible_tech in self.flexible_techs:
+            flex_input_name = f"{flexible_tech}_uncurtailed_{self.commodity}_out"
+            if flex_input_name in inputs:
+                flexible_production[flexible_tech] = inputs[flex_input_name][window_start:window_end]
+            else:
+                flexible_production[flexible_tech] = np.zeros(window_length)
 
         for tau in range(window_length):
             abs_tau = window_start + tau
@@ -244,10 +270,6 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
                 in_name = f"{fixed_tech}_{self.commodity}_out"
                 if in_name in inputs:
                     fixed_production[tau] += inputs[in_name][abs_tau]
-            for flexible_tech in self.flexible_techs:
-                rated_name = f"{flexible_tech}_rated_{self.commodity}_production"
-                if rated_name in inputs:
-                    flexible_production[tau] += inputs[rated_name][0]
 
         # Get dispatchable capacity bounds
         dispatchable_capacities = []
@@ -355,6 +377,10 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
         for t in model.t:
             model.demand_satisfied[t].set_value(0.0)
 
+        # Flexible tech uncurtailed output parameters
+        for i, flex_tech in enumerate(self.flexible_techs):
+            setattr(model, f"flex_out_{flex_tech}", Param(model.t, mutable=True, default=0.0))
+
         # Set bounds for dispatchable techs
         for t in model.t:
             for i, cap in enumerate(dispatchable_capacities):
@@ -399,7 +425,9 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
         def energy_balance_rule(m, t):
             disp_prod = sum(m.output[t, i] for i in range(len(self.dispatchable_techs)))
             storage_net = sum(m.charge[t, i] - m.discharge[t, i] for i in range(len(self.storage_techs)))
-            return disp_prod + fixed_production[t] + flexible_production[t] == m.demand_satisfied[t] + storage_net
+            # Sum flexible tech outputs from parameters
+            flex_prod = sum(getattr(m, f"flex_out_{tech}")[t] for tech in self.flexible_techs)
+            return disp_prod + fixed_production[t] + flex_prod == m.demand_satisfied[t] + storage_net
         model.energy_balance = Constraint(model.t, rule=energy_balance_rule)
 
         # Storage SOC dynamics
@@ -888,7 +916,6 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
 
         axes[-1].set_xlabel('Time Step')
         fig.tight_layout()
-        plt.show()
 
         # Print scalar summaries
         print("\n" + "="*60)
