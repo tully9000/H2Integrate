@@ -31,10 +31,10 @@ from h2integrate.core.h2integrate_model import H2IntegrateModel
 script_dir = Path(__file__).parent
 
 cases = {
+    "demand_following_battery": script_dir / "wind_ng_battery_demand_following.yaml",
     "cost_minimization": script_dir / "wind_ng_demand_cost_min.yaml",
     "profit_maximization": script_dir / "wind_ng_demand_profit_max.yaml",
     "cost_min_battery": script_dir / "wind_ng_battery_demand_cost_min.yaml",
-    "demand_following_battery": script_dir / "wind_ng_battery_demand_following.yaml",
 }
 
 # Plot the first 168 hours (1 week)

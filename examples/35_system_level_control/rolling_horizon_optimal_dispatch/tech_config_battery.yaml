@@ -72,7 +72,7 @@ technologies:
       performance_parameters:
         commodity: electricity
         commodity_rate_units: kW
-        demand_profile: 30000
+        demand_profile: 45000
 
   battery:
     performance_model:

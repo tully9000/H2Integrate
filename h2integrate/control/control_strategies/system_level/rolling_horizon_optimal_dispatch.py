@@ -159,6 +159,9 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
         simulation_range = self._get_compute_time_range(inputs["timestep_index"])
         timestep_index = int(inputs["timestep_index"][0])
 
+        if simulation_range.start > 100:
+            return 
+
         # Determine optimization window: [timestep_index, timestep_index + horizon_timesteps)
         window_start = timestep_index
         window_end = min(timestep_index + self.horizon_timesteps, self.n_timesteps)
@@ -692,6 +695,7 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
                     model.soc[t, tech].set_value(init_soc)
                 else:
                     model.soc[t, tech].set_value(model.soc[t-1, tech].value)
+        pass
 
     def _get_pyomo_solver(self):
         """Get Pyomo solver with fallback logic.
@@ -738,25 +742,23 @@ class RollingHorizonOptimalDispatch(SystemLevelControlBase):
             tech_idx = self.dispatchable_techs.index(tech)
             set_point_name = self.dispatchable_set_point_names[tech_idx]
             # Broadcast first timestep solution across entire control window
-            outputs[set_point_name][simulation_range] = np.full(
-                self.n_timesteps_window, tau_0_dispatch[tech]
-            )
+            outputs[set_point_name][simulation_range] = dispatch_decisions[tech][:self.n_timesteps_window]
 
         # Storage techs
         for tech in self.storage_techs:
             tech_idx = self.storage_techs.index(tech)
             set_point_name = self.storage_set_point_names[tech_idx]
-            outputs[set_point_name][simulation_range] = np.full(
-                self.n_timesteps_window, tau_0_dispatch[tech]
-            )
+            outputs[set_point_name][simulation_range] = dispatch_decisions[tech][:self.n_timesteps_window]
 
         # Flexible techs
         for tech in self.flexible_techs:
             tech_idx = self.flexible_techs.index(tech)
             set_point_name = self.flexible_set_point_names[tech_idx]
-            outputs[set_point_name][simulation_range] = np.full(
-                self.n_timesteps_window, tau_0_dispatch[tech]
-            )
+            outputs[set_point_name][simulation_range] = dispatch_decisions[tech][:self.n_timesteps_window]
+
+        pass
+
+
     def _has_time_index(self, component, time_set):
         """Check if component's index set includes time dimension."""
         if not component.is_indexed():
