@@ -10,6 +10,11 @@ from h2integrate.control.control_strategies.system_level.system_level_control_ba
 
 @define(kw_only=True)
 class ProfitMaximizationControlConfig(BaseConfig):
+    """Configure the sell price and per-technology marginal cost settings.
+
+    See :class:`ProfitMaximizationControl` and :doc:`/control/system_level_control/slc_profit_max`.
+    """
+
     commodity_sell_price: float = field(default=0.0)
     cost_per_tech: dict = field(default={})
 
@@ -52,6 +57,10 @@ class ProfitMaximizationControl(SystemLevelControlBase):
       ``technology_interconnections`` (using graph ancestors, so feedstocks
       behind intermediate components like combiners are included), and
       divide by the dispatchable tech's annualized total production.
+
+    See :class:`ProfitMaximizationControlConfig`,
+    :class:`~h2integrate.control.control_strategies.system_level.solver_options.SLCSolverOptionsConfig`,
+    and :doc:`/control/system_level_control/slc_profit_max`.
     """
 
     def _resolve_sell_price(self, config):
@@ -103,6 +112,8 @@ class ProfitMaximizationControl(SystemLevelControlBase):
         self._setup_marginal_costs()
 
     def compute(self, inputs, outputs):
+        simulation_range = self._get_compute_time_range(inputs["timestep_index"])
+
         demand = inputs[self.demand_input_name].copy()
         sell_price = inputs["commodity_sell_price"]  # shape (n_timesteps,)
 
@@ -143,7 +154,7 @@ class ProfitMaximizationControl(SystemLevelControlBase):
 
         # Initialize all dispatchable set-point outputs to zero
         for set_point_name in self.dispatchable_set_point_names:
-            outputs[set_point_name] = np.zeros(self.n_timesteps)
+            outputs[set_point_name][simulation_range] = np.zeros(self.n_timesteps_window)
 
         # Dispatch only where profitable (element-wise comparison)
         for idx in dispatch_order:
@@ -155,5 +166,5 @@ class ProfitMaximizationControl(SystemLevelControlBase):
             rated = inputs[rated_name]
 
             dispatch = np.where(profitable, np.minimum(remaining, rated), 0.0)
-            outputs[set_point_name] = dispatch
+            outputs[set_point_name][simulation_range] = dispatch[simulation_range]
             remaining -= dispatch
