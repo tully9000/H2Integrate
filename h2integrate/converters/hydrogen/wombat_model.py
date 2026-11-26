@@ -16,9 +16,15 @@ from h2integrate.converters.hydrogen.pem_electrolyzer import (
 @define(kw_only=True)
 class WOMBATElectrolyzerModelConfig(ECOElectrolyzerPerformanceModelConfig):
     """
-    library_path: Path to the WOMBAT library directory, relative from this file
-    if not an absolute path.
-    cost_year: dollar-year corresponding to capex value.
+    Configuration for :class:`WOMBATElectrolyzerModel`. See
+    :doc:`/technology_models/wombat_electrolyzer_om`.
+
+    Attributes:
+        library_path (Path): Path to the WOMBAT library directory. Relative paths
+            are resolved from this file.
+        cost_year (int): Dollar year corresponding to the capital cost value.
+
+    See :class:`ECOElectrolyzerPerformanceModelConfig` for inherited fields.
     """
 
     library_path: Path = field()
@@ -30,6 +36,8 @@ class WOMBATElectrolyzerModel(ECOElectrolyzerPerformanceModel):
     """
     WOMBATElectrolyzerModel is a joint performance and cost model for electrolyzers
     using the WOMBAT simulation framework.
+
+    See :class:`WOMBATElectrolyzerModelConfig` and :doc:`/technology_models/wombat_electrolyzer_om`.
 
     This class extends ECOElectrolyzerPerformanceModel and configures the WOMBAT model based
     on provided technology configuration inputs. It sets up output variables related to

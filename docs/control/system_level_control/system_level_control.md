@@ -3,7 +3,7 @@
 System-level control (SLC) within H2I is meant to operate to control the entire plant with performance and cost feedback driving the operation of the plant or system in a closed-loop. It acts as a supervisory controller meaning that it can work to coordinate the entire system and can work with other technology level controllers.
 
 ```{note}
-The SLC framework is *technology-agnostic* and works with any H2I technology (converters, storage, feedstocks, demand components, etc.). It only cares about a technology's [`_control_classifier`](control_classifier.md) and the commodity it produces. To opt a technology in, set `_control_classifier` on its performance model; for `flexible` models, also call `self.apply_curtailment(outputs)` at the end of `compute()`. See the [developer guide on adding a new technology](../../developer_guide/adding_a_new_technology.md) for the full checklist.
+The SLC framework is *technology-agnostic* and works with any H2I technology (converters, storage, feedstocks, demand components, etc.). It only cares about a technology's [`_control_classifier`](control_classifier.md) and the commodity it produces. To opt a technology in, set `_control_classifier` on its performance model; for `flexible` models, also call `self.apply_curtailment(inputs, outputs)` at the end of `compute()`. See the [developer guide on adding a new technology](../../developer_guide/adding_a_new_technology.md) for the full checklist.
 ```
 
 The most basic SLC is shown in the figure below, where the SLC receives a `{commodity}_demand` signal. Based on that demand it emits a per-technology `{tech_name}_{commodity}_set_point` signal to each controlled technology. Each technology group contains a controller that converts the incoming `{commodity}_set_point` into the `{commodity}_command_value` actually consumed by the technology's performance model. From each technology block there is `{commodity}_out` (potentially changed by the command-value signal) that is connected via feedback to the SLC. The SLC will then attempt to converge the system where it will loop through changing the per-tech set points in attempts to meet the system demand until the overall system stops changing how much `{commodity}_out` each technology is outputting.
@@ -64,3 +64,19 @@ See additional information, which is more developer focused, about the [`SystemL
 
 ## Solver Options
 The system attempts to converge the system using a solver. The solver is defined in `solver_options`.
+
+Set `scale_control_variables: true` in `solver_options` to scale SLC set points, automatically inserted passthrough command values, and the ProFAST levelized-cost output. This can prevent variables with large magnitudes from dominating the nonlinear solver's convergence norm in cyclic systems. Scaling is off by default.
+
+OpenMDAO uses `ref` to scale an output internally and `res_ref` to scale its residual, which the solver seeks to drive to 0 during convergence. For the default nonlinear block Gauss-Seidel solver, the residual is normally the change in outputs between iterations. The same characteristic value is used for both scales so that an output and a residual of that magnitude are each approximately one internally. These settings do not change the physical units or directly change reported output values, though scaling can affect solver convergence, and is used here to improve numerical stability.
+
+The rate references are coarse, fixed order-of-magnitude choices rather than values tuned to each plant: `1e5` for `kW` and `1e3` for `kg/h`.
+If units are unavailable or unrecognized, the fallback references are `1e5` for electricity, `1e3` for hydrogen, `4e3` for ammonia, and `1.0` for other commodities. In particular, units inherited from a connection may not be known when the scale is selected during setup; the commodity fallback then remains in use even after OpenMDAO resolves the units. These are numeric scales in the variable's units, not unit conversions, so the fallback may be a poor fit for different units or plant sizes.
+
+The ProFAST reference is `1e12`, matching its sentinel levelized cost when production is zero. This prevents that sentinel from overwhelming the residual norm, but also makes ordinary levelized-cost changes small in that norm. Scaling is a convergence aid, not a guarantee of convergence or accuracy; check the results and solver tolerances for the model.
+
+```yaml
+system_level_control:
+  solver_options:
+    solver_name: gauss_seidel
+    scale_control_variables: true
+```

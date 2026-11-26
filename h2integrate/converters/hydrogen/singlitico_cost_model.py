@@ -9,14 +9,17 @@ from h2integrate.converters.hydrogen.electrolyzer_baseclass import ElectrolyzerC
 @define(kw_only=True)
 class SingliticoCostModelConfig(CostModelBaseConfig):
     """
-    Configuration class for the ECOElectrolyzerPerformanceModel, outputs costs in 2021 USD.
+    Configuration class for :class:`SingliticoCostModel`, which outputs costs in 2021 USD.
 
-    Args:
+    See :doc:`/technology_models/pem_electrolyzer`.
+
+    Attributes:
         location (str): The location of the electrolyzer; options include "onshore" or "offshore".
         electrolyzer_capex (int): $/kW overnight installed capital costs for a 1 MW system in
             2022 USD/kW (DOE hydrogen program record 24005 Clean Hydrogen Production Cost Scenarios
             with PEM Electrolyzer Technology 05/20/24) #TODO: convert to refs
             (https://www.hydrogen.energy.gov/docs/hydrogenprogramlibraries/pdfs/24005-clean-hydrogen-production-cost-pem-electrolyzer.pdf?sfvrsn=8cb10889_1)
+        cost_year (int): Dollar year used for the cost output; currently fixed at 2021.
     """
 
     location: str = field(validator=validators.in_(["onshore", "offshore"]))
@@ -28,6 +31,8 @@ class SingliticoCostModelConfig(CostModelBaseConfig):
 class SingliticoCostModel(ElectrolyzerCostBaseClass):
     """
     An OpenMDAO component that computes the cost of a PEM electrolyzer.
+
+    See :class:`SingliticoCostModelConfig` and :doc:`/technology_models/pem_electrolyzer`.
     """
 
     _time_step_bounds = (

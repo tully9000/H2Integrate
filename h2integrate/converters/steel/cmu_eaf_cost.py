@@ -9,7 +9,9 @@ from h2integrate.core.supported_models import register
 class CMUElectricArcFurnaceCostConfig(CostModelBaseConfig):
     """Configuration class for the CMUElectricArcFurnaceCostModel.
 
-    Args:
+    See :class:`CMUElectricArcFurnaceCostModel` and :doc:`/technology_models/steel_eaf_cmu`.
+
+    Attributes:
         steel_production_capacity_tonnes_per_year (float): Rated electric arc furnace capacity
             in tonnes of steel produced per year. Default is 2200000 tonnes/year based on the CMU
             decarbSTEEL v5 model which assumes a 2.2 million tonne per year capacity for the EAF.
@@ -52,6 +54,8 @@ class CMUElectricArcFurnaceCostModel(CostModelBaseClass):
     """
     OpenMDAO component for calculating electric arc furnace capital and operating
     expenditures based on the CMU decarbSTEEL v5 model.
+
+    See :class:`CMUElectricArcFurnaceCostConfig` and :doc:`/technology_models/steel_eaf_cmu`.
 
 
     Inputs:

@@ -12,6 +12,18 @@ from h2integrate.control.control_rules.pyomo_rule_baseclass import (
 
 @define(kw_only=True)
 class PyomoStorageRuleBaseConfig(PyomoRuleBaseConfig):
+    """Configuration for Pyomo storage dispatch rules.
+
+    Attributes:
+        max_capacity (float): Maximum storage capacity in commodity amount units.
+        min_soc_fraction (float): Minimum state of charge as a fraction of capacity.
+        max_soc_fraction (float): Maximum state of charge as a fraction of capacity.
+        charge_efficiency (float): Fraction of input commodity retained when charging.
+        discharge_efficiency (float): Fraction of stored commodity available when discharging.
+
+    See :class:`PyomoRuleBaseConfig` for the inherited commodity fields.
+    """
+
     max_capacity: float = field(validator=validators.gt(0))
 
     min_soc_fraction: float = field(default=0.1, validator=(validators.ge(0), validators.le(1)))
@@ -25,14 +37,21 @@ class PyomoStorageRuleBaseConfig(PyomoRuleBaseConfig):
 
 @define(kw_only=True)
 class PyomoRuleStorageBaseclassConfig(PyomoStorageRuleBaseConfig):
-    """Configuration for the generic storage dispatch rule."""
+    """Configuration for :class:`PyomoRuleStorageBaseclass`.
+
+    See :doc:`/control/technology_level_control/pyomo_controllers`.
+    """
 
     pass
 
 
 @register
 class PyomoRuleStorageBaseclass(PyomoRuleBaseClass):
-    """Base class defining Pyomo rules for generic commodity storage components."""
+    """Base class defining Pyomo rules for generic commodity storage components.
+
+    See :class:`PyomoRuleStorageBaseclassConfig` and
+    :doc:`/control/technology_level_control/pyomo_controllers`.
+    """
 
     _time_step_bounds = (
         3600,

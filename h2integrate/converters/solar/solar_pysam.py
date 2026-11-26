@@ -47,6 +47,8 @@ class PYSAMSolarPlantPerformanceModelConfig(BaseConfig):
             `here <https://nrel-pysam.readthedocs.io/en/main/modules/Pvwattsv8.html>`__
             )
 
+    See :class:`PYSAMSolarPlantPerformanceModel` and
+    :doc:`/technology_models/pvwattsv8_solar_pv`.
     """
 
     pv_capacity_kWdc: float = field()
@@ -172,6 +174,9 @@ class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
     """
     An OpenMDAO component that wraps a SolarPlant model.
     It takes solar parameters as input and outputs power generation data.
+
+    See :class:`PYSAMSolarPlantPerformanceModelConfig` and
+    :doc:`/technology_models/pvwattsv8_solar_pv`.
     """
 
     _time_step_bounds = (
@@ -485,7 +490,7 @@ class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
             outputs["capacity_factor"] = outputs["total_electricity_produced"] / max_production
 
         # Apply curtailment based on set_point
-        self.apply_curtailment(outputs)
+        self.apply_curtailment(inputs, outputs)
 
     def compute(self, inputs, outputs, discrete_inputs, discrete_outputs):
         if inputs["system_capacity_DC"][0] <= 0:
@@ -495,15 +500,13 @@ class PYSAMSolarPlantPerformanceModel(SolarPerformanceBaseClass):
             outputs["total_electricity_produced"] = 0.0
             outputs["annual_electricity_produced"] = 0.0
             outputs["capacity_factor"] = 0.0
-            self.apply_curtailment(outputs)
+            self.apply_curtailment(inputs, outputs)
             return
 
         simulation_range = self._get_compute_time_range(inputs["timestep_index"])
 
-        if not self._PYSAM_model_has_been_executed:
-            assert simulation_range.start == 0, (
-                "PYSAM model should only be executed at the start of the simulation"
-            )
+        if (not self._PYSAM_model_has_been_executed) and (simulation_range.start == 0):
+            # PYSAM model setup and execution should only be done at the start of the simulation.
 
             if self.config.create_model_from == "default":
                 self.system_model = Pvwatts.default(self.config.config_name)

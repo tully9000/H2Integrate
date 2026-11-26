@@ -14,7 +14,10 @@ class MeteosatPrimeMeridianSolarAPIConfig(ResourceBaseAPIConfig):
     This dataset covers regions covered by the Meteosat Prime Meridian satellite (Africa and Europe)
     at a spatial resolution of 4 km.
 
-    Args:
+    See :class:`MeteosatPrimeMeridianSolarAPI` and
+    :doc:`/resource/meteosat_prime_meridian_v4_api`.
+
+    Attributes:
         resource_year (int): Year to use for resource data.
             Must been between 2005 and 2022 (inclusive).
         resource_data (dict | object, optional): Dictionary of user-input resource data.
@@ -45,6 +48,11 @@ class MeteosatPrimeMeridianSolarAPIConfig(ResourceBaseAPIConfig):
 
 @register
 class MeteosatPrimeMeridianSolarAPI(NLRDeveloperAPISolarResourceBase):
+    """Load Meteosat data using :class:`MeteosatPrimeMeridianSolarAPIConfig`.
+
+    See :doc:`/resource/meteosat_prime_meridian_v4_api`.
+    """
+
     def setup(self):
         resource_specs = self.helper_setup_method()
 
@@ -67,7 +75,10 @@ class MeteosatPrimeMeridianTMYSolarAPIConfig(ResourceBaseAPIConfig):
     and `Meteosat Prime Meridian TGY: PSM v4 <https://developer.nlr.gov/docs/solar/nsrdb/nsrdb-msg-v1-0-0-tgy-download/>`_,
     This dataset covers regions within North and South America at a spatial resolution of 4 km.
 
-    Args:
+    See :class:`MeteosatPrimeMeridianTMYSolarAPI` and
+    :doc:`/resource/meteosat_prime_meridian_v4_api`.
+
+    Attributes:
         resource_year (str): Year to use for resource data. Can be any of the following:
             tmy-2014, tdy-2014, tgy-2014, tmy-2022, tdy-2022, or tgy-2022
         resource_data (dict | object, optional): Dictionary of user-input resource data.
@@ -118,6 +129,11 @@ class MeteosatPrimeMeridianTMYSolarAPIConfig(ResourceBaseAPIConfig):
 
 @register
 class MeteosatPrimeMeridianTMYSolarAPI(NLRDeveloperAPISolarResourceBase):
+    """Load Meteosat typical-year data using :class:`MeteosatPrimeMeridianTMYSolarAPIConfig`.
+
+    See :doc:`/resource/meteosat_prime_meridian_v4_api`.
+    """
+
     def setup(self):
         resource_specs = self.helper_setup_method()
 

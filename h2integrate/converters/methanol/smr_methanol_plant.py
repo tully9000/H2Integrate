@@ -16,13 +16,32 @@ from h2integrate.converters.methanol.methanol_baseclass import (
 
 @define(kw_only=True)
 class SMRMethanolPlantFinanceModelConfig(MethanolFinanceConfig):
-    """Configuration for the SMR methanol finance model."""
+    """Configuration for :class:`SMRMethanolPlantFinanceModel`.
+
+    See :doc:`/technology_models/methanol`.
+    """
 
     pass
 
 
 @define(kw_only=True)
 class SMRMethanolPlantPerformanceModelConfig(MethanolPerformanceConfig):
+    """Configuration for :class:`SMRMethanolPlantPerformanceModel`.
+
+    Attributes:
+        meoh_syn_cat_consume_ratio (float): Synthesis catalyst consumed per kilogram of
+            methanol, in cubic feet per kilogram.
+        meoh_atr_cat_consume_ratio (float): Autothermal-reforming catalyst consumed per
+            kilogram of methanol, in cubic feet per kilogram.
+        ng_consume_ratio (float): Natural gas consumed per kilogram of methanol, in
+            kilograms per kilogram.
+        elec_produce_ratio (float): Electricity produced per kilogram of methanol, in
+            kilowatt-hours per kilogram.
+
+    See :class:`MethanolPerformanceConfig` for inherited capacity and production fields.
+    See :doc:`/technology_models/methanol`.
+    """
+
     meoh_syn_cat_consume_ratio: float = field()
     meoh_atr_cat_consume_ratio: float = field()
     ng_consume_ratio: float = field()
@@ -33,8 +52,11 @@ class SMRMethanolPlantPerformanceModelConfig(MethanolPerformanceConfig):
 class SMRMethanolPlantPerformanceModel(MethanolPerformanceBaseClass):
     """
     An OpenMDAO component for modeling the performance of a steam methane reforming (SMR) methanol
-    plant. Computes annual methanol and co-product production, feedstock consumption, and emissions
-    based on plant capacity and capacity factor.
+    plant. Computes methanol and electricity production and feedstock consumption based on plant
+    capacity and available feedstocks.
+
+    See :class:`SMRMethanolPlantPerformanceModelConfig`, :class:`SMRMethanolPlantCostModel`,
+    and :doc:`/technology_models/methanol`.
 
     Inputs:
         - meoh_syn_cat_consume_ratio: ratio of ft^3 methanol synthesis catalyst consumed to
@@ -130,6 +152,20 @@ class SMRMethanolPlantPerformanceModel(MethanolPerformanceBaseClass):
 
 @define(kw_only=True)
 class SMRMethanolPlantCostModelConfig(MethanolCostConfig):
+    """Configuration for :class:`SMRMethanolPlantCostModel`.
+
+    Attributes:
+        ng_lhv (float): Natural gas lower heating value in megajoules per kilogram.
+        meoh_syn_cat_price (float): Synthesis catalyst cost in dollars per cubic foot.
+        meoh_atr_cat_price (float): Autothermal-reforming catalyst cost in dollars per
+            cubic foot.
+        ng_price (float): Natural gas cost in dollars per million British thermal units.
+        cost_year (int): Dollar year used for the cost assumptions.
+
+    See :class:`MethanolCostConfig` for inherited capacity and cost fields.
+    See :doc:`/technology_models/methanol`.
+    """
+
     ng_lhv: float = field()
     meoh_syn_cat_price: float = field()
     meoh_atr_cat_price: float = field()
@@ -141,6 +177,9 @@ class SMRMethanolPlantCostModelConfig(MethanolCostConfig):
 class SMRMethanolPlantCostModel(MethanolCostBaseClass):
     """
     An OpenMDAO component for modeling the cost of a steam methane (SMR) reforming methanol plant.
+
+    See :class:`SMRMethanolPlantCostModelConfig`, :class:`SMRMethanolPlantPerformanceModel`,
+    :class:`SMRMethanolPlantFinanceModel`, and :doc:`/technology_models/methanol`.
 
     Inputs:
         ng_lhv: natural gas lower heating value in MJ/kg
@@ -217,6 +256,9 @@ class SMRMethanolPlantFinanceModel(MethanolFinanceBaseClass):
     """
     An OpenMDAO component for modeling the financing of a steam methane reforming (SMR) methanol
     plant.
+
+    See :class:`SMRMethanolPlantFinanceModelConfig`, :class:`SMRMethanolPlantCostModel`,
+    and :doc:`/technology_models/methanol`.
 
     Inputs:
         meoh_syn_cat_cost: annual cost of synthesis catalyst in USD/year

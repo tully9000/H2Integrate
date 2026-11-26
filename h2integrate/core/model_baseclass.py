@@ -201,7 +201,7 @@ class PerformanceModelBaseClass(om.ExplicitComponent):
         ti = int(time_index[0])
         return range(ti, ti + self.n_timesteps_window)
 
-    def apply_curtailment(self, outputs):
+    def apply_curtailment(self, inputs, outputs):
         """Apply curtailment to ``{commodity}_out`` based on ``{commodity}_command_value``.
 
         Copies the current ``{commodity}_out`` into ``uncurtailed_{commodity}_out``,
@@ -215,15 +215,19 @@ class PerformanceModelBaseClass(om.ExplicitComponent):
             if getattr(self, "_control_classifier", None) != "flexible":
                 return
 
+            simulation_range = self._get_compute_time_range(inputs["timestep_index"])
+
             commodity_out_key = f"{self.commodity}_out"
             uncurtailed_key = f"uncurtailed_{self.commodity}_out"
             command_value_key = f"{self.commodity}_command_value"
 
             uncurtailed = np.array(outputs[commodity_out_key])
-            outputs[uncurtailed_key] = uncurtailed
+            outputs[uncurtailed_key][simulation_range] = uncurtailed[simulation_range]
 
             command_value = self._inputs[command_value_key]
-            outputs[commodity_out_key] = np.minimum(uncurtailed, command_value)
+            outputs[commodity_out_key][simulation_range] = np.minimum(uncurtailed, command_value)[
+                simulation_range
+            ]
 
     def compute(self, inputs, outputs, discrete_inputs, discrete_outputs):
         """
@@ -237,6 +241,12 @@ class PerformanceModelBaseClass(om.ExplicitComponent):
 
 @define(kw_only=True)
 class CostModelBaseConfig(BaseConfig):
+    """Base configuration for cost models.
+
+    Attributes:
+        cost_year (int): Dollar year used for the reported costs.
+    """
+
     cost_year: int = field(converter=int)
 
 
@@ -321,6 +331,19 @@ class CostModelBaseClass(SkippableComputeMixin, om.ExplicitComponent):
 
 @define(kw_only=True)
 class ResizeablePerformanceModelBaseConfig(BaseConfig):
+    """Configuration for performance-model resizing behavior.
+
+    Attributes:
+        size_mode (str): Sizing method: ``"normal"``, ``"resize_by_max_feedstock"``,
+            or ``"resize_by_max_commodity"``.
+        flow_used_for_sizing (str | None): Feedstock or commodity flow used to determine
+            capacity when ``size_mode`` is not ``"normal"``.
+        max_feedstock_ratio (float): Maximum fraction of available feedstock the model
+            may consume when resizing by feedstock.
+        max_commodity_ratio (float): Maximum fraction of downstream commodity demand
+            the model may produce when resizing by commodity.
+    """
+
     size_mode: str = field(default="normal")
     flow_used_for_sizing: str | None = field(default=None)
     max_feedstock_ratio: float = field(default=1.0)
@@ -410,6 +433,13 @@ class ResizeablePerformanceModelBaseClass(PerformanceModelBaseClass):
 
 @define(kw_only=True)
 class CacheBaseConfig(BaseConfig):
+    """Configuration for model-result caching.
+
+    Attributes:
+        enable_caching (bool): Whether to read and write cached model results.
+        cache_dir (str | Path): Directory used to store and retrieve cached results.
+    """
+
     enable_caching: bool = field()
     cache_dir: str | Path = field()
 

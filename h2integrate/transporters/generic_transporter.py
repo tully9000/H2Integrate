@@ -9,7 +9,11 @@ from h2integrate.core.supported_models import register
 class GenericTransporterPerformanceConfig(BaseConfig):
     """Configuration class for a generic transporter.
 
-    Fields include `commodity` and `commodity_rate_units`.
+    Attributes:
+        commodity (str): Name of the commodity to transport.
+        commodity_rate_units (str): Rate units for the commodity (e.g., ``"kg/h"``).
+
+    See :class:`GenericTransporterPerformanceModel` and :doc:`/technology_models/transport`.
     """
 
     commodity: str = field(converter=(str.strip))
@@ -23,6 +27,8 @@ class GenericTransporterPerformanceModel(om.ExplicitComponent):
 
     This component is purposefully simple; a more realistic case might include
     losses or other considerations from system components.
+
+    See :class:`GenericTransporterPerformanceConfig` and :doc:`/technology_models/transport`.
     """
 
     _time_step_bounds = (

@@ -11,7 +11,7 @@ class PySAMTidalPerformanceConfig(BaseConfig):
     """
     Configuration class for MHKTidalPlant.
 
-    Args:
+    Attributes:
         device_rating_kw (float): Rated power of the MHK device [kW]
         num_devices (int): Number of MHK tidal devices in the system
         tidal_power_curve (List[List[float]]): Power curve of tidal energy device as
@@ -29,6 +29,7 @@ class PySAMTidalPerformanceConfig(BaseConfig):
         run_recalculate_power_curve (bool, optional): If True, the tidal device power curve will be
             recalculated based on the device_rating_kw and original power_curve. Defaults to False.
 
+    See :class:`PySAMTidalPerformanceModel` and :doc:`/technology_models/tidal`.
     """
 
     device_rating_kw: float = field(validator=validators.gt(0))
@@ -120,6 +121,9 @@ class PySAMTidalPerformanceConfig(BaseConfig):
 class PySAMTidalPerformanceModel(PerformanceModelBaseClass):
     """An OpenMDAO component that wraps the PySAM MhkTidal model.
     It takes tidal parameters as input and outputs power generation data.
+
+    See :class:`PySAMTidalPerformanceConfig`, :class:`~h2integrate.resource.tidal.TidalResource`,
+    and :doc:`/technology_models/tidal`.
     """
 
     _time_step_bounds = (
@@ -234,4 +238,4 @@ class PySAMTidalPerformanceModel(PerformanceModelBaseClass):
 
         # Honor a system-level controller's set-point by curtailing
         # `electricity_out`. No-op when there is no system-level controller.
-        self.apply_curtailment(outputs)
+        self.apply_curtailment(inputs, outputs)

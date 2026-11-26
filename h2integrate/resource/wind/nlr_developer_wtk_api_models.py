@@ -12,7 +12,9 @@ class WTKNLRDeveloperAPIWindResourceConfig(ResourceBaseAPIConfig):
     """Configuration class to download wind resource data from
     `Wind Toolkit Data V2 <https://developer.nlr.gov/docs/wind/wind-toolkit/wtk-download/>`_.
 
-    Args:
+    See :class:`WTKNLRDeveloperAPIWindResource` and :doc:`/resource/wind_toolkit_v2_api`.
+
+    Attributes:
         resource_year (int): Year to use for resource data.
             Must been between 2007 and 2014 (inclusive).
 
@@ -34,6 +36,11 @@ class WTKNLRDeveloperAPIWindResourceConfig(ResourceBaseAPIConfig):
 
 @register
 class WTKNLRDeveloperAPIWindResource(NLRDeveloperAPIWindResourceBase):
+    """Load Wind Toolkit data using :class:`WTKNLRDeveloperAPIWindResourceConfig`.
+
+    See :doc:`/resource/wind_toolkit_v2_api`.
+    """
+
     def setup(self):
         resource_specs = self.helper_setup_method()
 
@@ -54,7 +61,9 @@ class HRRRMETToolkitWindAPIConfig(ResourceBaseAPIConfig):
     `HRRR MET Toolkit <https://developer.nlr.gov/docs/wind/wind-toolkit/wtk-hrrr-met-toolkit-v1-0-0-download/>`_.
     This dataset covers the Continental United States at a spatial resolution of 2 km.
 
-    Args:
+    See :class:`HRRRMETToolkitWindAPI` and :doc:`/resource/wind_toolkit_v2_api`.
+
+    Attributes:
         resource_year (int): Year to use for resource data.
             Must been between 2015 and 2025 (inclusive).
 
@@ -76,6 +85,11 @@ class HRRRMETToolkitWindAPIConfig(ResourceBaseAPIConfig):
 
 @register
 class HRRRMETToolkitWindAPI(NLRDeveloperAPIWindResourceBase):
+    """Load HRRR MET data using :class:`HRRRMETToolkitWindAPIConfig`.
+
+    See :doc:`/resource/wind_toolkit_v2_api`.
+    """
+
     def setup(self):
         resource_specs = self.helper_setup_method()
 

@@ -35,7 +35,7 @@ from h2integrate.control.control_strategies.passthrough_controller import Passth
 from h2integrate.control.control_strategies.system_level.solver_options import (
     SLCSolverOptionsConfig,
 )
-from h2integrate.control.control_strategies.system_level.system_level_control_baseclass import (
+from h2integrate.control.control_strategies.system_level.marginal_cost_tools import (
     _get_tech_buy_price_input_name,
 )
 
@@ -1156,10 +1156,16 @@ class H2IntegrateModel:
         # Build the controller sized to the plant's simulation horizon so its
         # vector I/O matches the performance model's time-series I/O.
         n_timesteps = int(self.plant_config["plant"]["simulation"]["n_timesteps"])
+        scale_control_variables = (
+            self.plant_config.get("system_level_control", {})
+            .get("solver_options", {})
+            .get("scale_control_variables", False)
+        )
         controller = PassthroughController(
             commodity=commodity,
             n_timesteps=n_timesteps,
             commodity_rate_units=commodity_rate_units,
+            scale_output=scale_control_variables,
         )
 
         # Promote all controller variables so:
@@ -1933,6 +1939,29 @@ class H2IntegrateModel:
                 has_cycles,
             )
 
+        if time_marching:
+            check_model_is_steppable(
+                control_strategies=self.control_strategies,
+                performance_models=self.performance_models,
+                system_level_controller=getattr(self.plant, "system_level_controller", None),
+            )
+            configured_options = self.plant_config.get("system_level_control", {}).get(
+                "solver_options", {}
+            )
+            solver_options = {}
+            if configured_options:
+                solver_config = SLCSolverOptionsConfig.from_dict({"iprint": 0} | configured_options)
+                if solver_config.solver_name != "gauss_seidel":
+                    raise ValueError(
+                        "Time marching requires system_level_control.solver_options.solver_name "
+                        f"to be 'gauss_seidel', not '{solver_config.solver_name}'."
+                    )
+                solver_options = solver_config.get_solver_options()
+            self.plant.nonlinear_solver = TimeMarchingPlantSolver(
+                plant_config=self.plant_config, **solver_options
+            )
+            return
+
         if self.slc:
             # Because the controller creates a feedback loop (controller outputs become technology
             # inputs, whose outputs feed back to the controller), a nonlinear solver is required.
@@ -1960,12 +1989,6 @@ class H2IntegrateModel:
         if has_cycles:
             self.plant.nonlinear_solver = om.NonlinearBlockGS()
             self.plant.linear_solver = om.DirectSolver()
-
-        if time_marching:
-            # Assign custom nonlinear solver to plant group to manage time-marching simulation
-            self.plant.nonlinear_solver = TimeMarchingPlantSolver(plant_config=self.plant_config)
-
-            check_model_is_steppable(self.control_strategies, self.performance_models)
 
     def create_driver_model(self):
         """

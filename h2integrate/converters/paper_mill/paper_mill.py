@@ -7,6 +7,32 @@ from h2integrate.core.supported_models import register
 
 @define(kw_only=True)
 class PaperMillPerformanceModelConfig(BaseConfig):
+    """Configure capacity, production yields, and feedstock consumption.
+
+    Attributes:
+        plant_capacity_mtpy (float): Nameplate paper production capacity in metric tonnes per year.
+        capacity_factor (float): Fraction of nameplate capacity operated on average, from 0 to 1.
+        lignin_yield (float): Metric tonnes of lignin produced per metric tonne of paper.
+        pulp_yield (float): Metric tonnes of pulp produced per metric tonne of paper.
+        wood_consumption (float): Metric tonnes of wood consumed per metric tonne of paper.
+        raw_water_consumption (float): Kilograms of raw water consumed per metric tonne of paper.
+        calcium_carbonate_consumption (float): Kilograms of calcium carbonate consumed per
+            metric tonne of paper.
+        sodium_sulfide_consumption (float): Kilograms of sodium sulfide consumed per
+            metric tonne of paper.
+        sodium_hydroxide_consumption (float): Kilograms of sodium hydroxide consumed per
+            metric tonne of paper.
+        chlorine_dioxide_consumption (float): Kilograms of chlorine dioxide consumed per
+            metric tonne of paper.
+        hydrogen_peroxide_consumption (float): Kilograms of hydrogen peroxide consumed per
+            metric tonne of paper.
+        magnesium_sulfate_consumption (float): Kilograms of magnesium sulfate consumed per
+            metric tonne of paper.
+        oxygen_consumption (float): Kilograms of oxygen consumed per metric tonne of paper.
+
+    See :class:`PaperMillPerformanceModel` and :doc:`/technology_models/paper_mill`.
+    """
+
     plant_capacity_mtpy: float = field()
     capacity_factor: float = field()
     lignin_yield: float = field(default=0.06)  # t lignin/t paper
@@ -27,6 +53,8 @@ class PaperMillPerformanceModel(PerformanceModelBaseClass):
     """
     An OpenMDAO component for modeling the performance of an paper mill plant.
     Computes annual paper production based on plant capacity and capacity factor.
+
+    See :class:`PaperMillPerformanceModelConfig` and :doc:`/technology_models/paper_mill`.
     """
 
     _time_step_bounds = (
@@ -132,6 +160,55 @@ class PaperMillPerformanceModel(PerformanceModelBaseClass):
 
 @define(kw_only=True)
 class PaperMillCostModelConfig(BaseConfig):
+    """Configure capacity, cost year, feedstock consumption, and unit costs.
+
+    Attributes:
+        installation_time (int): Project year in which construction starts.
+        inflation_rate (float): Annual inflation rate used to escalate costs.
+        operational_year (int): Project year used to report operating costs.
+        plant_capacity_mtpy (float): Nameplate paper production capacity in metric tonnes per year.
+        cost_year (int): Dollar year for unit cost assumptions; only 2023 is supported.
+        wood_consumption (float): Metric tonnes of wood consumed per metric tonne of paper.
+        raw_water_consumption (float): Kilograms of raw water consumed per metric tonne of paper.
+        calcium_carbonate_consumption (float): Kilograms of calcium carbonate consumed per
+            metric tonne of paper.
+        sodium_sulfide_consumption (float): Kilograms of sodium sulfide consumed per
+            metric tonne of paper.
+        sodium_hydroxide_consumption (float): Kilograms of sodium hydroxide consumed per
+            metric tonne of paper.
+        chlorine_dioxide_consumption (float): Kilograms of chlorine dioxide consumed per
+            metric tonne of paper.
+        hydrogen_peroxide_consumption (float): Kilograms of hydrogen peroxide consumed per
+            metric tonne of paper.
+        magnesium_sulfate_consumption (float): Kilograms of magnesium sulfate consumed per
+            metric tonne of paper.
+        oxygen_consumption (float): Kilograms of oxygen consumed per metric tonne of paper.
+        electricity_consumption (float): Kilowatt-hours of electricity consumed per metric
+            tonne of paper.
+        water_disposal_rate (float): Kilograms of wastewater disposed per metric tonne of paper.
+        wood_unitcost (float): Purchase cost in dollars per metric tonne of wood.
+        wood_transport_cost (float): Transport cost in dollars per metric tonne of wood.
+        calcium_carbonate_unitcost (float): Purchase cost in dollars per kilogram.
+        calcium_carbonate_transport_cost (float): Transport cost in dollars per kilogram.
+        sodium_sulfide_unitcost (float): Purchase cost in dollars per kilogram.
+        sodium_sulfide_transport_cost (float): Transport cost in dollars per kilogram.
+        sodium_hydroxide_unitcost (float): Purchase cost in dollars per kilogram.
+        sodium_hydroxide_transport_cost (float): Transport cost in dollars per kilogram.
+        chlorine_dioxide_unitcost (float): Purchase cost in dollars per kilogram.
+        chlorine_dioxide_transport_cost (float): Transport cost in dollars per kilogram.
+        hydrogen_peroxide_unitcost (float): Purchase cost in dollars per kilogram.
+        hydrogen_peroxide_transport_cost (float): Transport cost in dollars per kilogram.
+        magnesium_sulfate_unitcost (float): Purchase cost in dollars per kilogram.
+        magnesium_sulfate_transport_cost (float): Transport cost in dollars per kilogram.
+        oxygen_unitcost (float): Purchase cost in dollars per tonne of oxygen.
+        oxygen_transport_cost (float): Transport cost in dollars per tonne of oxygen.
+        electricity_cost (float): Electricity purchase cost in dollars per kilowatt-hour.
+        raw_water_unitcost (float): Raw water purchase cost in dollars per kilogram.
+        water_disposal_unitcost (float): Wastewater disposal cost in dollars per kilogram.
+
+    See :class:`PaperMillCostModel` and :doc:`/technology_models/paper_mill`.
+    """
+
     installation_time: int = field()
     inflation_rate: float = field()
     operational_year: int = field()
@@ -175,7 +252,9 @@ class PaperMillCostModelConfig(BaseConfig):
 class PaperMillCostModel(CostModelBaseClass):
     """
     An OpenMDAO component for calculating the costs associated with paper mill production.
-    Includes CapEx, OpEx, and byproduct credits.
+    Reports CapEx, fixed OpEx, and VarOpEx based on nameplate capacity.
+
+    See :class:`PaperMillCostModelConfig` and :doc:`/technology_models/paper_mill`.
     """
 
     _time_step_bounds = (

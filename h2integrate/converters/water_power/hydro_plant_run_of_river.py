@@ -15,13 +15,14 @@ class RunOfRiverHydroPerformanceConfig(BaseConfig):
     """Configuration class for the RunOfRiverHydroPerformanceComponent.
     This class defines the parameters for the run-of-river hydropower plant performance model.
 
-    Args:
+    Attributes:
         plant_capacity_mw (float): Capacity of the run-of-river hydropower plant in MW.
         water_density (float): Density of water in kg/m^3.
         acceleration_gravity (float): Acceleration due to gravity in m/s^2.
         turbine_efficiency (float): Efficiency of the turbine as a decimal.
         head (float): Head of the water in meters.
-        flow_rate (list): Flow rate of water in m^3/s.
+
+    See :class:`RunOfRiverHydroPerformanceModel` and :doc:`/technology_models/run_of_river`.
     """
 
     plant_capacity_mw: float = field()
@@ -36,6 +37,9 @@ class RunOfRiverHydroPerformanceModel(PerformanceModelBaseClass):
     """
     An OpenMDAO component for modeling the performance of a run-of-river hydropower plant.
     Computes annual electricity production based on water flow rate and turbine efficiency.
+
+    See :class:`RunOfRiverHydroPerformanceConfig`, :class:`RunOfRiverHydroCostModel`, and
+    :doc:`/technology_models/run_of_river`.
     """
 
     _time_step_bounds = (
@@ -89,7 +93,7 @@ class RunOfRiverHydroPerformanceModel(PerformanceModelBaseClass):
 
         # Honor a system-level controller's set-point by curtailing
         # `electricity_out`. No-op when there is no system-level controller.
-        self.apply_curtailment(outputs)
+        self.apply_curtailment(inputs, outputs)
 
 
 @define(kw_only=True)
@@ -97,12 +101,14 @@ class RunOfRiverHydroCostConfig(CostModelBaseConfig):
     """Configuration class for the RunOfRiverHydroCostComponent.
     This class defines the parameters for the run-of-river hydropower plant cost model.
 
-    Args:
+    Attributes:
         plant_capacity_mw (float): Capacity of the run-of-river hydropower plant in MW.
         capital_cost_usd_per_kw (float): Capital cost of the run-of-river plant in USD/kW.
         operational_cost_usd_per_kw_year (float): Operational cost as a percentage of total
             capacity, expressed in USD/kW/year.
         cost_year (int): dollar-year for input costs
+
+    See :class:`RunOfRiverHydroCostModel` and :doc:`/technology_models/run_of_river`.
     """
 
     plant_capacity_mw: float = field()
@@ -117,6 +123,9 @@ class RunOfRiverHydroCostModel(CostModelBaseClass):
         hydropower plant.
 
     Just a placeholder for now, but can be extended with more detailed cost models.
+
+    See :class:`RunOfRiverHydroCostConfig`, :class:`RunOfRiverHydroPerformanceModel`, and
+    :doc:`/technology_models/run_of_river`.
     """
 
     _time_step_bounds = (

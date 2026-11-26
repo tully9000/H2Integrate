@@ -29,6 +29,9 @@ from h2integrate.core.supported_models import register
 class CMUElectricArcFurnaceDRIPerformanceComponentConfig(BaseConfig):
     """Configuration baseclass for CMUElectricArcFurnaceDRIPerformanceComponent.
 
+    See :class:`CMUElectricArcFurnaceDRIPerformanceComponent` and
+    :doc:`/technology_models/steel_eaf_cmu`.
+
     Attributes:
         steel_production_capacity_tonnes_per_year (float): Rated electric arc furnace capacity
             in tonnes of steel produced per year. Default is 2200000 tonnes/year based on the CMU
@@ -40,6 +43,13 @@ class CMUElectricArcFurnaceDRIPerformanceComponentConfig(BaseConfig):
             requirements and slag composition. Default value of 0.1% mass carbon in steel.
         scrap_composition (dict): dictionary with mass fraction of Fe and SiO2 in scrap. Default
             values of 94% mass Fe and 1% mass SiO2 in scrap.
+        pellet_grade (str): Iron-ore pellet grade: ``"DR"``, ``"BF"``, or ``"custom"``.
+        pct_DRI (float): Fraction of the iron-bearing feed supplied as direct-reduced iron.
+        DRI_feed_temp (str): DRI feed condition, ``"hot"`` or ``"cold"``.
+        DRI_composition (dict[str, float] | None): Optional mass-fraction composition of the DRI.
+        SiO2_ratio (float | None): Optional silica ratio used in the DRI mass balance.
+        energy_mass_balance_dict (dict): Energy and mass-balance assumptions used by the EAF
+            model, including natural gas, electrode use, slag composition, and carbon additions.
 
     """
 
@@ -140,6 +150,12 @@ class CMUElectricArcFurnaceDRIPerformanceComponentConfig(BaseConfig):
 
 @register
 class CMUElectricArcFurnaceDRIPerformanceComponent(PerformanceModelBaseClass):
+    """CMU decarbSTEEL electric arc furnace with a DRI and scrap charge.
+
+    See :class:`CMUElectricArcFurnaceDRIPerformanceComponentConfig` and
+    :doc:`/technology_models/steel_eaf_cmu`.
+    """
+
     _time_step_bounds = (
         3600,
         3600,

@@ -10,8 +10,18 @@ from h2integrate.core.supported_models import register
 class GenericSplitterPerformanceConfig(BaseConfig):
     """Configuration class for the GenericSplitterPerformanceModel.
 
-    Fields include `split_mode`, `commodity`, `commodity_rate_units`,
-    `fraction_to_priority_tech`, and `prescribed_commodity_to_priority_tech`.
+    Attributes:
+        split_mode (str): Splitting method: ``"fraction"`` or ``"prescribed_commodity"``.
+        commodity (str): Name of the commodity to split.
+        commodity_rate_units (str): Rate units for the commodity (e.g., ``"kg/h"``).
+        fraction_to_priority_tech (float | None): Fraction of the input stream assigned
+            to the priority technology when ``split_mode`` is ``"fraction"``.
+        prescribed_commodity_to_priority_tech (float | None): Amount of commodity per
+            timestep assigned to the priority technology when ``split_mode`` is
+            ``"prescribed_commodity"``.
+
+    See :class:`GenericSplitterPerformanceModel` and
+    :doc:`/technology_models/combiners_and_splitters`.
     """
 
     split_mode: str = field(
@@ -57,7 +67,7 @@ class GenericSplitterPerformanceModel(om.ExplicitComponent):
     - Prescribed commodity splitting: send a prescribed amount to the priority
         technology, with the remainder to the other technology.
 
-    The ``priority_tech`` parameter determines which technology receives the
+    The order of downstream connections determines which technology receives the
     primary allocation. The outputs are:
 
     - ``{commodity}_out1``: commodity sent to the first technology.
@@ -65,6 +75,9 @@ class GenericSplitterPerformanceModel(om.ExplicitComponent):
 
     This component is purposefully simple; a more realistic case might include
     losses or other considerations from system components.
+
+    See :class:`GenericSplitterPerformanceConfig` and
+    :doc:`/technology_models/combiners_and_splitters`.
     """
 
     _time_step_bounds = (

@@ -16,7 +16,9 @@ class ECOElectrolyzerPerformanceModelConfig(ResizeablePerformanceModelBaseConfig
     """
     Configuration class for the ECOElectrolyzerPerformanceModel.
 
-    Args:
+    See :class:`ECOElectrolyzerPerformanceModel` and :doc:`/technology_models/pem_electrolyzer`.
+
+    Attributes:
         size_mode (str): The mode in which the component is sized. Options:
             - "normal": The component size is taken from the tech_config.
             - "resize_by_max_feedstock": Resize based on maximum feedstock availability.
@@ -58,6 +60,9 @@ class ECOElectrolyzerPerformanceModel(ElectrolyzerPerformanceBaseClass):
     """
     An OpenMDAO component that wraps the PEM electrolyzer model.
     Takes electricity input and outputs hydrogen and oxygen generation rates.
+
+    See :class:`ECOElectrolyzerPerformanceModelConfig` and
+    :doc:`/technology_models/pem_electrolyzer`.
     """
 
     _time_step_bounds = (

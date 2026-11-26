@@ -7,6 +7,18 @@ from h2integrate.core.model_baseclass import CostModelBaseClass, PerformanceMode
 
 @define(kw_only=True)
 class MethanolPerformanceConfig(BaseConfig):
+    """Shared configuration for methanol performance models.
+
+    Attributes:
+        plant_capacity_kgpy (float): Annual nameplate capacity in kilograms per year.
+        plant_capacity_flow (str): Capacity basis, either ``"hydrogen"`` or ``"methanol"``.
+        capacity_factor (float): Configured fraction of nameplate capacity.
+        co2e_emit_ratio (float): Kilograms of CO2-equivalent emitted per kilogram of methanol.
+        h2o_consume_ratio (float): Kilograms of water consumed per kilogram of methanol.
+
+    See :doc:`/technology_models/methanol` for model-specific configurations.
+    """
+
     plant_capacity_kgpy: float = field()
     plant_capacity_flow: str = field(validator=validators.in_(["hydrogen", "methanol"]))
     capacity_factor: float = field()
@@ -17,8 +29,8 @@ class MethanolPerformanceConfig(BaseConfig):
 class MethanolPerformanceBaseClass(PerformanceModelBaseClass):
     """
     An OpenMDAO component for modeling the performance of a methanol plant.
-    Computes annual methanol and co-product production, feedstock consumption, and emissions
-    based on plant capacity and capacity factor.
+    Declares shared capacity and commodity inputs and outputs for methanol plant models.
+    See :doc:`/technology_models/methanol` for implementation details and limitations.
 
     Inputs:
         - plant_capacity_kgpy: (float) plant capacity in kg/year
@@ -59,6 +71,19 @@ class MethanolPerformanceBaseClass(PerformanceModelBaseClass):
 
 @define(kw_only=True)
 class MethanolCostConfig(BaseConfig):
+    """Shared configuration for methanol cost models.
+
+    Attributes:
+        plant_capacity_kgpy (float): Annual nameplate capacity in kilograms per year.
+        plant_capacity_flow (str): Capacity basis, either ``"hydrogen"`` or ``"methanol"``.
+        toc_kg_y (float): Total overnight cost slope in dollars per annual kilogram of capacity.
+        foc_kg_y2 (float): Fixed operating cost slope in dollars per capacity-year squared.
+        voc_kg (float): Variable operating cost in dollars per kilogram of methanol.
+        cost_year (int): Dollar year used for the cost assumptions.
+
+    See :doc:`/technology_models/methanol` for model-specific configurations.
+    """
+
     plant_capacity_kgpy: float = field()
     plant_capacity_flow: str = field(validator=validators.in_(["hydrogen", "methanol"]))
     toc_kg_y: float = field()
@@ -111,6 +136,18 @@ class MethanolCostBaseClass(CostModelBaseClass):
 
 @define(kw_only=True)
 class MethanolFinanceConfig(BaseConfig):
+    """Shared configuration for methanol finance models.
+
+    Attributes:
+        tasc_toc_multiplier (float): Multiplier converting total overnight cost to total
+            as-spent capital cost.
+        fixed_charge_rate (float): Annual fixed-charge fraction used to calculate levelized cost.
+        plant_capacity_kgpy (float): Annual nameplate capacity in kilograms per year.
+        plant_capacity_flow (str): Capacity basis, either ``"hydrogen"`` or ``"methanol"``.
+
+    See :doc:`/technology_models/methanol` for model-specific configurations.
+    """
+
     tasc_toc_multiplier: float = field()
     fixed_charge_rate: float = field()
     plant_capacity_kgpy: float = field()

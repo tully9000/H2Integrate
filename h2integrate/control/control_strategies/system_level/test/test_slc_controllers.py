@@ -5,6 +5,11 @@ import pytest
 import networkx as nx
 import openmdao.api as om
 
+from h2integrate.core.time_marching_solver import TimeMarchingPlantSolver
+from h2integrate.control.control_strategies.system_level.marginal_cost_tools import (
+    _get_tech_buy_price_input_name,
+    _get_buy_price_default_and_shape,
+)
 from h2integrate.control.control_strategies.system_level.demand_following_control import (
     DemandFollowingControl,
 )
@@ -14,6 +19,50 @@ from h2integrate.control.control_strategies.system_level.cost_minimization_contr
 from h2integrate.control.control_strategies.system_level.profit_maximization_control import (
     ProfitMaximizationControl,
 )
+
+
+@pytest.mark.unit
+def test_buy_price_configuration_helpers(subtests):
+    cases = [
+        ({"electricity_buy_price": 0.04}, "electricity_buy_price", 0.04, 4),
+        (
+            {"electricity_buy_price": 0.04, "buy_price_mode": "constant"},
+            "electricity_buy_price",
+            0.04,
+            1,
+        ),
+        (
+            {"electricity_buy_price": [0.04] * 3, "buy_price_mode": "per_year"},
+            "electricity_buy_price",
+            [0.04] * 3,
+            3,
+        ),
+        ({"price": 0.02}, "price", 0.02, 1),
+        ({"price": [0.02, 0.03]}, "price", [0.02, 0.03], 2),
+        ({"price": np.array([0.02, 0.03])}, "price", [0.02, 0.03], 2),
+        ({}, None, 0.0, 4),
+    ]
+    for parameters, input_name, price, shape in cases:
+        with subtests.test(parameters=parameters):
+            config = {"technologies": {"tech": {"model_inputs": {"cost_parameters": parameters}}}}
+            assert _get_tech_buy_price_input_name(config, "tech") == input_name
+            actual_price, actual_shape = _get_buy_price_default_and_shape(config, "tech", 4, 3)
+            np.testing.assert_array_equal(actual_price, price)
+            assert actual_shape == shape
+
+    with subtests.test("cost parameters override shared defaults"):
+        config = {
+            "technologies": {
+                "tech": {
+                    "model_inputs": {
+                        "shared_parameters": {"price": 0.01},
+                        "cost_parameters": {"price": 0.02},
+                    }
+                }
+            }
+        }
+        assert _get_tech_buy_price_input_name(config, "tech") == "price"
+        assert _get_buy_price_default_and_shape(config, "tech", 4, 3) == (0.02, 1)
 
 
 def _build_plant_config(
@@ -144,6 +193,67 @@ def _build_problem(slc_cls, plant_config, slc_topology, demand=50000, tech_confi
     return prob
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize("maxiter", [10, 1])
+def test_time_marching_slc_feedback(maxiter: int) -> None:
+    connections = [["gen", "demand", "electricity", "cable"]]
+    plant_config = _build_plant_config(connections)
+    plant_config["plant"]["simulation"]["n_timesteps_window"] = 2
+    topology = _build_slc_topology(
+        _build_technology_graph(connections), _build_tech_control_classifiers(dispatchable=["gen"])
+    )
+    expected = np.arange(1.0, 5.0)
+    topology["demand_profile"] = expected
+
+    prob = om.Problem()
+    plant = prob.model.add_subsystem("plant", om.Group())
+    plant.add_subsystem(
+        "slc",
+        CostMinimizationControl(
+            plant_config=plant_config, slc_topology=topology, tech_config={}, driver_config={}
+        ),
+    )
+    plant.add_subsystem(
+        "gen",
+        om.ExecComp(
+            ["production = command", "rated = 5.0"],
+            production={"val": np.zeros(4), "units": "kW"},
+            command={"val": np.zeros(4), "units": "kW"},
+            rated={"val": 0.0, "units": "kW"},
+        ),
+    )
+    plant.connect("slc.gen_electricity_set_point", "gen.command")
+    plant.connect("gen.production", "slc.gen_electricity_out")
+    plant.connect("gen.rated", "slc.gen_rated_electricity_production")
+    plant.nonlinear_solver = TimeMarchingPlantSolver(plant_config, maxiter=maxiter)
+    prob.setup()
+
+    if maxiter == 1:
+        set_point_name = "plant.slc.gen_electricity_set_point"
+        initial_later_window = prob.get_val(set_point_name)[2:].copy()
+        with pytest.raises(om.AnalysisError, match="window starting at timestep 0"):
+            prob.run_model()
+        np.testing.assert_array_equal(prob.get_val(set_point_name)[2:], initial_later_window)
+    else:
+        prob.run_model()
+        np.testing.assert_allclose(prob.get_val("plant.gen.production"), expected)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("cost_spec", ["VarOpEx", "feedstock"])
+def test_time_marching_rejects_marginal_costs_from_cost_outputs(cost_spec: str) -> None:
+    connections = [["gen", "demand", "electricity", "cable"]]
+    plant_config = _build_plant_config(connections, cost_per_tech={"gen": cost_spec})
+    plant_config["plant"]["simulation"]["n_timesteps_window"] = 2
+    topology = _build_slc_topology(
+        _build_technology_graph(connections), _build_tech_control_classifiers(dispatchable=["gen"])
+    )
+    with pytest.raises(
+        ValueError, match=f"Time marching does not support cost_per_tech '{cost_spec}'"
+    ):
+        _build_problem(ProfitMaximizationControl, plant_config, topology)
+
+
 # ---------------------------------------------------------------------------
 # SystemLevelControlBase
 # ---------------------------------------------------------------------------
@@ -151,54 +261,67 @@ def _build_problem(slc_cls, plant_config, slc_topology, demand=50000, tech_confi
 class TestSystemLevelControlBase:
     """Tests for the abstract base class setup logic."""
 
-    def test_base_creates_flexible_io(self):
-        tech_connections = [["wind", "demand", "electricity", "cable"]]
-        plant_config = _build_plant_config(tech_connections)
-        tech_graph = _build_technology_graph(tech_connections)
-        tech_control_classifiers = _build_tech_control_classifiers(flexible=["wind"])
-        slc_topology = _build_slc_topology(tech_graph, tech_control_classifiers)
-        # Use DemandFollowingControl since base is abstract
-        prob = _build_problem(DemandFollowingControl, plant_config, slc_topology)
-        # _var_rel2meta uses relative names (no "slc." prefix)
-        assert "wind_electricity_out" in prob.model.slc._var_rel2meta
-        assert "wind_rated_electricity_production" in prob.model.slc._var_rel2meta
-        assert "wind_electricity_set_point" in prob.model.slc._var_rel2meta
-
-    def test_base_creates_dispatchable_io(self):
+    @pytest.mark.parametrize("scale_control_variables", [True, False])
+    def test_set_point_scaling(self, subtests, scale_control_variables):
         tech_connections = [["ng", "demand", "electricity", "cable"]]
         plant_config = _build_plant_config(tech_connections)
+        plant_config["system_level_control"]["solver_options"] = {
+            "scale_control_variables": scale_control_variables
+        }
         tech_graph = _build_technology_graph(tech_connections)
         tech_control_classifiers = _build_tech_control_classifiers(dispatchable=["ng"])
         slc_topology = _build_slc_topology(tech_graph, tech_control_classifiers)
         prob = _build_problem(DemandFollowingControl, plant_config, slc_topology)
-        assert "ng_electricity_out" in prob.model.slc._var_rel2meta
-        assert "ng_rated_electricity_production" in prob.model.slc._var_rel2meta
-        assert "ng_electricity_set_point" in prob.model.slc._var_rel2meta
+        metadata = prob.model.slc._var_rel2meta["ng_electricity_set_point"]
+        expected_reference = 1e5 if scale_control_variables else 1.0
 
-    def test_base_creates_storage_io(self):
-        tech_connections = [["battery", "demand", "electricity", "cable"]]
+        with subtests.test("set point reference scale"):
+            assert metadata["ref"] == expected_reference
+            assert metadata["res_ref"] == expected_reference
+
+        with subtests.test("dispatch is unchanged by scaling"):
+            prob.set_val("slc.ng_rated_electricity_production", 80000)
+            prob.run_model()
+            np.testing.assert_allclose(prob.get_val("slc.ng_electricity_set_point"), 50000)
+
+    def test_set_point_scaling_with_connection_derived_units(self):
+        tech_connections = [
+            ["plant1", "sink", "ammonia", "pipe"],
+            ["plant2", "sink", "ammonia", "pipe"],
+        ]
         plant_config = _build_plant_config(tech_connections)
+        plant_config["system_level_control"]["solver_options"] = {"scale_control_variables": True}
         tech_graph = _build_technology_graph(tech_connections)
-        tech_control_classifiers = _build_tech_control_classifiers(storage=["battery"])
-        slc_topology = _build_slc_topology(tech_graph, tech_control_classifiers)
-        prob = _build_problem(DemandFollowingControl, plant_config, slc_topology)
+        classifiers = _build_tech_control_classifiers(dispatchable=["plant1", "plant2"])
+        slc_topology = _build_slc_topology(tech_graph, classifiers)
+        slc_topology["demand_profile"] = 50000
 
-        assert "battery_electricity_out" in prob.model.slc._var_rel2meta
-        assert "battery_rated_electricity_production" in prob.model.slc._var_rel2meta
-        assert "battery_electricity_set_point" in prob.model.slc._var_rel2meta
+        prob = om.Problem()
+        prob.model.add_subsystem(
+            "source", om.IndepVarComp("ammonia_out", val=np.ones(4), units="kg/h")
+        )
+        prob.model.add_subsystem(
+            "slc",
+            DemandFollowingControl(
+                driver_config={},
+                plant_config=plant_config,
+                tech_config={},
+                slc_topology=slc_topology,
+            ),
+        )
+        for tech in ("plant1", "plant2"):
+            prob.model.connect("source.ammonia_out", f"slc.{tech}_ammonia_out")
+        prob.setup()
+        prob.final_setup()
 
-    def test_base_creates_demand_input(self):
-        plant_config = _build_plant_config([])
-        tech_graph = _build_technology_graph([])
-        tech_control_classifiers = _build_tech_control_classifiers()
-        slc_topology = _build_slc_topology(tech_graph, tech_control_classifiers)
-        prob = _build_problem(DemandFollowingControl, plant_config, slc_topology)
-
-        assert "electricity_demand" in prob.model.slc._var_rel2meta
-
-    def test_backward_compat_alias(self):
-        """DemandFollowingControl should be an alias for DemandFollowingControl."""
-        assert DemandFollowingControl is DemandFollowingControl
+        metadata = prob.model.get_io_metadata(
+            iotypes="output", metadata_keys=["units", "ref", "res_ref"]
+        )
+        for tech in ("plant1", "plant2"):
+            set_point = metadata[f"slc.{tech}_ammonia_set_point"]
+            assert set_point["units"] == "kg/h"
+            assert set_point["ref"] == 4e3
+            assert set_point["res_ref"] == 4e3
 
 
 # ---------------------------------------------------------------------------
@@ -269,6 +392,14 @@ class TestDemandFollowingControl:
         slc_topology = _build_slc_topology(tech_graph, tech_control_classifiers)
         prob = _build_problem(DemandFollowingControl, plant_config, slc_topology)
 
+        for tech in ("wind", "battery", "ng"):
+            assert {
+                f"{tech}_electricity_out",
+                f"{tech}_rated_electricity_production",
+                f"{tech}_electricity_set_point",
+            } <= prob.model.slc._var_rel2meta.keys()
+        assert "electricity_demand" in prob.model.slc._var_rel2meta
+
         prob.set_val("slc.wind_electricity_out", [70000, 30000, 50000, 50000])
         prob.set_val("slc.wind_rated_electricity_production", 120000)
         prob.set_val("slc.battery_electricity_out", [0, 0, 0, 0])
@@ -289,6 +420,7 @@ class TestDemandFollowingControl:
         slc_topology = _build_slc_topology(tech_graph, tech_control_classifiers)
         prob = _build_problem(DemandFollowingControl, plant_config, slc_topology)
 
+        assert "electricity_demand" in prob.model.slc._var_rel2meta
         prob.run_model()  # should not raise
 
 

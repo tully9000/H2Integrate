@@ -11,6 +11,15 @@ from h2integrate.converters.steel.steel_baseclass import (
 
 @define(kw_only=True)
 class SteelPerformanceModelConfig(BaseConfig):
+    """Configuration for :class:`SteelPerformanceModel`.
+
+    Attributes:
+        plant_capacity_mtpy (float): Nameplate steel production capacity in metric tonnes per year.
+        capacity_factor (float): Fraction of nameplate capacity operated on average, from 0 to 1.
+
+    See :doc:`/technology_models/steel_eaf`.
+    """
+
     plant_capacity_mtpy: float = field()
     capacity_factor: float = field()
 
@@ -20,6 +29,9 @@ class SteelPerformanceModel(SteelPerformanceBaseClass):
     """
     An OpenMDAO component for modeling the performance of an steel plant.
     Computes annual steel production based on plant capacity and capacity factor.
+
+    See :class:`SteelPerformanceModelConfig`, :class:`SteelCostAndFinancialModel`, and
+    :doc:`/technology_models/steel_eaf`.
     """
 
     _time_step_bounds = (
@@ -47,6 +59,49 @@ class SteelPerformanceModel(SteelPerformanceBaseClass):
 
 @define(kw_only=True)
 class SteelCostAndFinancialModelConfig(BaseConfig):
+    """Configuration for :class:`SteelCostAndFinancialModel`.
+
+    Attributes:
+        installation_time (int): Duration of construction in months.
+        inflation_rate (float): Annual inflation rate used to escalate costs.
+        operational_year (int): Year key used to select the natural gas price.
+        plant_capacity_mtpy (float): Nameplate steel production capacity in metric tonnes per year.
+        capacity_factor (float): Fraction of nameplate capacity operated on average, from 0 to 1.
+        o2_heat_integration (bool): Whether excess oxygen is credited through heat integration.
+        lcoh (float): Levelized cost of hydrogen used in the steel cost calculation, in dollars
+            per kilogram.
+        natural_gas_prices (dict): Natural gas price assumptions used by the cost model.
+        grid_prices (dict): Electricity-grid price assumptions used by the cost model.
+        financial_assumptions (dict): Financial inputs passed to the ProFAST steel analysis.
+        cost_year (int): Dollar year for the cost assumptions; only 2022 is supported.
+        excess_oxygen (float): Excess oxygen available for sale or integration, in kilograms of
+            oxygen per metric tonne of steel.
+        lime_unitcost (float): Lime purchase cost in dollars per metric tonne of lime.
+        lime_transport_cost (float): Lime transport cost in dollars per metric tonne of lime.
+        carbon_unitcost (float): Carbon purchase cost in dollars per metric tonne of carbon.
+        carbon_transport_cost (float): Carbon transport cost in dollars per metric tonne of carbon.
+        electricity_cost (float): Electricity purchase cost in dollars per megawatt-hour.
+        iron_ore_pellet_unitcost (float): Iron-ore pellet purchase cost in dollars per metric
+            tonne of pellets.
+        iron_ore_pellet_transport_cost (float): Iron-ore pellet transport cost in dollars per
+            metric tonne of pellets.
+        oxygen_market_price (float): Market price for excess oxygen in dollars per kilogram.
+        raw_water_unitcost (float): Raw water purchase cost in dollars per metric tonne of water.
+        iron_ore_consumption (float): Iron-ore pellet consumption per metric tonne of steel.
+        raw_water_consumption (float): Raw water consumption per metric tonne of steel.
+        lime_consumption (float): Lime consumption per metric tonne of steel.
+        carbon_consumption (float): Carbon consumption per metric tonne of steel.
+        hydrogen_consumption (float): Hydrogen consumption per metric tonne of steel.
+        natural_gas_consumption (float): Natural gas consumption per metric tonne of steel.
+        electricity_consumption (float): Electricity consumption per metric tonne of steel.
+        slag_disposal_unitcost (float): Slag disposal cost in dollars per metric tonne of slag.
+        slag_production (float): Slag production per metric tonne of steel.
+        maintenance_materials_unitcost (float): Maintenance-material cost in dollars per metric
+            tonne of steel.
+
+    See :doc:`/technology_models/steel_eaf`.
+    """
+
     installation_time: int = field()
     inflation_rate: float = field()
     operational_year: int = field()
@@ -89,6 +144,9 @@ class SteelCostAndFinancialModel(SteelCostBaseClass):
     """
     An OpenMDAO component for calculating the costs associated with steel production.
     Includes CapEx, OpEx, and byproduct credits.
+
+    See :class:`SteelCostAndFinancialModelConfig`, :class:`SteelPerformanceModel`, and
+    :doc:`/technology_models/steel_eaf`.
     """
 
     _time_step_bounds = (
